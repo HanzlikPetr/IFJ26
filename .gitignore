@@ -1,0 +1,5 @@
+*.o
+*.d
+utest_*
+ifj26
+*.zip
