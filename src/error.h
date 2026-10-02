@@ -33,6 +33,30 @@ typedef enum {
 #define CHECK_ERR(err) ((err) != IFJ_SUCCESS)
 
 /**
+ * @brief Makro pro kontrolu chybového kódu a návrat z funkce
+ * @param err Chybový kód
+ */
+#define CHECK_ERR_RET(err)                                                     \
+  do {                                                                         \
+    if (CHECK_ERR(err)) {                                                      \
+      LOG_ERR(err, "Error occurred");                                          \
+      return err;                                                              \
+    }                                                                          \
+  } while (0)
+
+/**
+ * @brief Makro pro kontrolu alokace paměti
+ * @param ptr Ukazatel na alokovanou paměť
+ */
+#define CHECK_MEM_ERR(ptr)                                                     \
+  do {                                                                         \
+    if ((ptr) == NULL) {                                                       \
+      LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed");                      \
+      return IFJ_EINTERNAL;                                                    \
+    }                                                                          \
+  } while (0)
+
+/**
  * @brief Makro pro logování chybového kódu a zprávy
  * @param err Chybový kód
  * @param ... Formátovací řetězec zprávy a jeho volitelné argumenty
