@@ -59,7 +59,7 @@ $(TEST_TARGETS): utest_%: ./tests/utest/test_%.o $(TEST_SRCS_OBJS)
 # Pravidlo pro formátování kódu
 #---------------------------------------------------
 format:
-	clang-format --style=llvm -i $(SRCS) $(HEADERS) $(TESTS)
+	clang-format --style=file -i $(SRCS) $(HEADERS) $(TESTS)
 
 #---------------------------------------------------
 # Pravidlo pro vytvoření archivu
