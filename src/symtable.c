@@ -26,10 +26,7 @@ struct avl_node {
 
 IFJ_ERR symtable_init(symtable_t *table) {
   // Kontrola proti NULL pointeru
-  if (table == NULL) {
-    LOG_ERR(IFJ_EINTERNAL, "Table address cannot be null.");
-    return IFJ_EINTERNAL;
-  }
+  CHECK_ARGS_NULL_RET(table);
 
   // Nulovani stromu
   table->root = NULL;
@@ -52,6 +49,12 @@ static IFJ_ERR create_node(const char *key, const symtable_data_t *value,
 
   // Inicializace nového uzlu
   new_node->key = strdup(key);
+  if (new_node->key == NULL) {
+    free(new_node);
+    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed for key.");
+    return IFJ_EINTERNAL;
+  }
+
   new_node->data = *value;
   new_node->height = 1;
   new_node->right = NULL;
@@ -76,12 +79,45 @@ static int max(int a, int b) { return (a > b) ? a : b; }
  * @param node Ukazatel na uzel.
  * @return Výška uzlu, nebo 0 pokud je uzel NULL.
  */
-static int height(avl_node_t *node) {
+static int get_height(avl_node_t *node) {
   if (!node) {
     return 0;
   }
+  return node->height;
+}
 
-  return max(height(node->left), height(node->right)) + 1;
+/**
+ * @brief Pomocná funkce pro pravou rotaci uzlu.
+ * @param crit_node Ukazatel na kritický uzel.
+ * @return Ukazatel na nový kořen podstromu po rotaci.
+ */
+static avl_node_t *rotate_right(avl_node_t *crit_node) {
+  avl_node_t *new = crit_node->left;
+  crit_node->left = new->right;
+  new->right = crit_node;
+
+  crit_node->height =
+      max(get_height(crit_node->left), get_height(crit_node->right)) + 1;
+  new->height = max(get_height(new->left), get_height(new->right)) + 1;
+
+  return new;
+}
+
+/**
+ * @brief Pomocná funkce pro levou rotaci uzlu.
+ * @param crit_node Ukazatel na kritický uzel.
+ * @return Ukazatel na nový kořen podstromu po rotaci.
+ */
+static avl_node_t *rotate_left(avl_node_t *crit_node) {
+  avl_node_t *new = crit_node->right;
+  crit_node->right = new->left;
+  new->left = crit_node;
+
+  crit_node->height =
+      max(get_height(crit_node->left), get_height(crit_node->right)) + 1;
+  new->height = max(get_height(new->left), get_height(new->right)) + 1;
+
+  return new;
 }
 
 /**
@@ -90,12 +126,14 @@ static int height(avl_node_t *node) {
  * @param key Klíč uzlu.
  * @param value Hodnota uzlu.
  * @return IFJ_EINTERNAL při chybě alokace paměti.
+ * @return IFJ_ESEM_REDEF pokud klíč již existuje v tabulce.
  * @return IFJ_SUCCESS při úspěšném vložení.
  */
 static IFJ_ERR avl_insert(avl_node_t **root, const char *key,
                           const symtable_data_t *value) {
   avl_node_t *new_node;
   IFJ_ERR err;
+  int balance;
 
   // Pokud je strom prázdný, vytvoříme nový uzel a nastavíme ho jako kořen
   if (!*root) {
@@ -117,12 +155,37 @@ static IFJ_ERR avl_insert(avl_node_t **root, const char *key,
     CHECK_ERR_RET(err);
   } else {
     // Pokud klíč již existuje, vrátíme chybu
-    LOG_ERR(IFJ_EINTERNAL, "Key already exists: %s", key);
-    return IFJ_EINTERNAL;
+    LOG_ERR(IFJ_ESEM_REDEF, "Key already exists: %s", key);
+    return IFJ_ESEM_REDEF;
   }
 
   // Aktualizace vyvážení uzlu
-  (*root)->height = height(*root);
+  (*root)->height =
+      1 + max(get_height((*root)->left), get_height((*root)->right));
+
+  // Získání vyvážení uzlu
+  balance = get_height((*root)->right) - get_height((*root)->left);
+
+  // Kontrola vyvážení uzlu a případná rotace pro vyvážení stromu
+  if (balance > 1) {
+    if (strcmp((*root)->right->key, key) < 0) {
+      // Pravý-pravý případ
+      *root = rotate_left(*root);
+    } else {
+      // Pravý-levý případ
+      (*root)->right = rotate_right((*root)->right);
+      *root = rotate_left(*root);
+    }
+  } else if (balance < -1) {
+    if (strcmp((*root)->left->key, key) > 0) {
+      // Levý-levý případ
+      *root = rotate_right(*root);
+    } else {
+      // Levý-pravý případ
+      (*root)->left = rotate_left((*root)->left);
+      *root = rotate_right(*root);
+    }
+  }
   return IFJ_SUCCESS;
 }
 
@@ -131,10 +194,7 @@ IFJ_ERR symtable_insert(symtable_t *table, const char *key,
   IFJ_ERR err;
 
   // Kontrola proti NULL pointeru
-  if (table == NULL || key == NULL || value == NULL) {
-    LOG_ERR(IFJ_EINTERNAL, "Table, key or value address cannot be null.");
-    return IFJ_EINTERNAL;
-  }
+  CHECK_ARGS_NULL_RET(table, key, value);
 
   // Vložení prvku do stromu
   err = avl_insert(&table->root, key, value);
@@ -148,14 +208,14 @@ IFJ_ERR symtable_insert(symtable_t *table, const char *key,
  * @param root Ukazatel na kořenový uzel stromu nebo podstromu.
  * @param key Klíč uzlu.
  * @param value Ukazatel na hodnotu uzlu.
- * @return IFJ_EINTERNAL pokud prvek neexistuje.
+ * @return IFJ_ESEM_UNDEF pokud prvek neexistuje.
  * @return IFJ_SUCCESS při úspěšném vyhledání.
  */
 static IFJ_ERR avl_find(avl_node_t *root, const char *key,
                         symtable_data_t **value) {
   // Pokud je strom prázdný, vrátíme chybu
   if (!root) {
-    return IFJ_EINTERNAL;
+    return IFJ_ESEM_UNDEF;
   }
 
   // Porovnání klíče s klíčem kořene a rekurzivní vyhledání v levém nebo pravém
@@ -173,7 +233,7 @@ static IFJ_ERR avl_find(avl_node_t *root, const char *key,
     return IFJ_SUCCESS;
   }
 
-  return IFJ_EINTERNAL;
+  return IFJ_ESEM_UNDEF;
 }
 
 IFJ_ERR symtable_find(symtable_t *table, const char *key,
@@ -181,14 +241,11 @@ IFJ_ERR symtable_find(symtable_t *table, const char *key,
   IFJ_ERR err;
 
   // Kontrola proti NULL pointeru
-  if (table == NULL || key == NULL || value == NULL) {
-    LOG_ERR(IFJ_EINTERNAL, "Table, key or value address cannot be null.");
-    return IFJ_EINTERNAL;
-  }
+  CHECK_ARGS_NULL_RET(table, key, value);
 
   // Pokud je strom prázdný, vrátíme chybu
   if (!table->root) {
-    return IFJ_EINTERNAL;
+    return IFJ_ESEM_UNDEF;
   }
 
   err = avl_find(table->root, key, value);
@@ -212,10 +269,7 @@ static void avl_destroy(avl_node_t *root) {
 
 IFJ_ERR symtable_destroy(symtable_t *table) {
   // Kontrola proti NULL pointeru
-  if (table == NULL) {
-    LOG_ERR(IFJ_EINTERNAL, "Table address cannot be null.");
-    return IFJ_EINTERNAL;
-  }
+  CHECK_ARGS_NULL_RET(table);
 
   // Uvolnění stromu
   avl_destroy(table->root);
@@ -225,55 +279,3 @@ IFJ_ERR symtable_destroy(symtable_t *table) {
 
   return IFJ_SUCCESS;
 }
-
-#ifdef DEBUG
-
-static void print_tree_keys(avl_node_t *root) {
-  if (root) {
-    printf("%s", root->key);
-    print_tree_keys(root->left);
-    print_tree_keys(root->right);
-  }
-}
-
-static void print_tree_data(avl_node_t *root) {
-  if (root) {
-    printf("%d", root->data.cislo);
-    print_tree_data(root->left);
-    print_tree_data(root->right);
-  }
-}
-
-int main() {
-  IFJ_ERR err;
-  symtable_t *table = NULL;
-  int cisla[] = {1, 2, 3, 4, 5};
-  char *keys[] = {"g", "e", "a", "f", "j"};
-  symtable_data_t data, *found_data;
-
-  err = symtable_init(&table);
-  CHECK_ERR_RET(err);
-
-  for (int i = 0; i < 5; i++) {
-    data.cislo = cisla[i];
-    err = symtable_insert(table, keys[i], &data);
-    CHECK_ERR_RET(err);
-    print_tree_keys(table->root);
-    printf("\n");
-  }
-
-  print_tree_data(table->root);
-  printf("\n");
-
-  symtable_find(table, "a", &found_data);
-  printf("Key: %s, data: %d\n", "a", found_data->cislo);
-  found_data->cislo = 10;
-
-  symtable_find(table, "b", &found_data);
-  printf("Key: %s, data: %d\n", "b", found_data->cislo);
-
-  err = symtable_destroy(&table);
-  return err;
-}
-
-#endif

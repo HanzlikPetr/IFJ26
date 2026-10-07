@@ -42,7 +42,8 @@ IFJ_ERR symtable_init(symtable_t *table);
  * @param table Ukazatel na tabulku symbolů.
  * @param key Klíč prvku.
  * @param value Hodnota prvku.
- * @return IFJ_EINTERNAL při chybě alokace paměti, nebo pokud je poslán NULL pointer.
+ * @return IFJ_EINTERNAL při chybě alokace paměti, nebo pokud je poslán NULL
+ * pointer.
  * @return IFJ_ESEM_REDEF pokud klíč již existuje v tabulce.
  * @return IFJ_SUCCESS při úspěšném vložení.
  */
