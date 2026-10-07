@@ -13,7 +13,7 @@ HEADERS = $(wildcard ./src/*.h ./tests/utest/*.h)
 TESTS = $(wildcard ./tests/utest/*.c)
 TESTS_OBJS = $(TESTS:.c=.o)
 TEST_TARGETS = $(patsubst ./tests/utest/test_%.c,utest_%,$(TESTS))
-TEST_SRCS_OBJS = $(filter-out ./src/main.o,$(SRCS_OBJS))
+TEST_SRCS_OBJS = $(filter-out ./src/compiler.o,$(SRCS_OBJS))
 
 TARGET = ifj26
 TEST_LDLIBS = -lcmocka
