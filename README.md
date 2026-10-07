@@ -294,36 +294,43 @@ a zkontrolujte výsledek v diffu.
 ## Komentování kódu (Doxygen)
 
 Komentáře se píší **česky**. Používají se řádkové komentáře `//`; dokumentační
-komentáře pro **Doxygen** se píší `///` (Doxygen samotné `//` nerozpozná).
+komentáře pro **Doxygen** se píší jako blokové komentáře `/** ... */` (Doxygen
+samotné `//` nerozpozná).
 
 - **Úvod všech zdrojových textů** musí obsahovat zakomentovaný název projektu,
   přihlašovací jména a jména studujících, kteří se na daném souboru skutečně
   autorsky podíleli.
 
   ```c
-  /// @file parser.c
-  /// @brief Projekt IFJ26 - syntaktická analýza
-  ///
-  /// @author xhanzlp00 Petr Hanzlík
-  /// @author xberanm00 ...
+  /**
+   * @file parser.c
+   * @brief Projekt IFJ26 - syntaktická analýza
+   *
+   * @author xhanzlp00 Petr Hanzlík
+   * @author xberanm00 ...
+   */
   ```
 
 - **Funkce** mají `@brief`, `@param` a `@return`. Návratových hodnot (`@return`)
   může být i více, pokud to dává smysl.
 
   ```c
-  /// @brief Rotace uzlu binárního stromu doleva.
-  ///
-  /// @param tree Strom, ve kterém se rotuje.
-  /// @param node Uzel, nad kterým se rotace provádí.
-  /// @return IFJ_ERR Úspěch či chybový stav.
+  /**
+   * @brief Rotace uzlu binárního stromu doleva.
+   *
+   * @param tree Strom, ve kterém se rotuje.
+   * @param node Uzel, nad kterým se rotace provádí.
+   * @return IFJ_ERR Úspěch či chybový stav.
+   */
   ```
 
 - **Struktury** se deklarují přes `typedef` (`typedef struct`) a mají `@brief`;
   u jednotlivých položek se uvede jejich význam.
 
   ```c
-  /// @brief Reprezentace uzlu binárního stromu.
+  /**
+   * @brief Reprezentace uzlu binárního stromu.
+   */
   typedef struct node {
     int value;          // Hodnota uložená v uzlu.
     struct node *left;  // Levý potomek.
