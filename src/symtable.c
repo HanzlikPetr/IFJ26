@@ -53,6 +53,7 @@ static IFJ_ERR create_node(const char *key, const symtable_data_t *value,
   // Inicializace nového uzlu
   new_node->key = strdup(key);
   new_node->data = *value;
+  new_node->height = 1;
   new_node->right = NULL;
   new_node->left = NULL;
 
@@ -63,6 +64,27 @@ static IFJ_ERR create_node(const char *key, const symtable_data_t *value,
 }
 
 /**
+ * @brief Pomocná funcke pro zjisteneni maxima.
+ * @param a Vyska prvniho uzlu.
+ * @param b Vyska druheho uzlu.
+ * @return Vyska vyssiho uzlu.
+ */
+static int max(int a, int b) { return (a > b) ? a : b; }
+
+/**
+ * @brief Pomocná funkce pro získání výšky uzlu.
+ * @param node Ukazatel na uzel.
+ * @return Výška uzlu, nebo 0 pokud je uzel NULL.
+ */
+static int height(avl_node_t *node) {
+  if (!node) {
+    return 0;
+  }
+
+  return max(height(node->left), height(node->right)) + 1;
+}
+
+/**
  * @brief Pomocná funkce pro rekurzivní vložení uzlu do AVL stromu.
  * @param root Ukazatel na kořenový uzel stromu nebo podstromu.
  * @param key Klíč uzlu.
@@ -70,47 +92,42 @@ static IFJ_ERR create_node(const char *key, const symtable_data_t *value,
  * @return IFJ_EINTERNAL při chybě alokace paměti.
  * @return IFJ_SUCCESS při úspěšném vložení.
  */
-static IFJ_ERR avl_insert(avl_node_t *root, const char *key,
+static IFJ_ERR avl_insert(avl_node_t **root, const char *key,
                           const symtable_data_t *value) {
   avl_node_t *new_node;
   IFJ_ERR err;
 
+  // Pokud je strom prázdný, vytvoříme nový uzel a nastavíme ho jako kořen
+  if (!*root) {
+    err = create_node(key, value, &new_node);
+    CHECK_ERR_RET(err);
+    *root = new_node;
+    return IFJ_SUCCESS;
+  }
+
   // Pokud je klíč menší než klíč kořene, vložíme do levého podstromu, jinak do
   // pravého podstromu
-  if (strcmp(root->key, key) > 0) {
-    // Pokud existuje levý potomek, rekurzivně voláme avl_insert na levém
-    // podstromu, jinak vytvoříme nový uzel a přiřadíme ho jako levého potomka
-    if (root->left) {
-      err = avl_insert(root->left, key, value);
-      CHECK_ERR_RET(err);
-    } else {
-      err = create_node(key, value, &new_node);
-      CHECK_ERR_RET(err);
-      root->left = new_node;
-    }
-  } else if (strcmp(root->key, key) < 0) {
-    // Pokud existuje pravý potomek, rekurzivně voláme avl_insert na pravém
-    // podstromu, jinak vytvoříme nový uzel a přiřadíme ho jako pravého potomka
-    if (root->right) {
-      err = avl_insert(root->right, key, value);
-      CHECK_ERR_RET(err);
-    } else {
-      err = create_node(key, value, &new_node);
-      CHECK_ERR_RET(err);
-      root->right = new_node;
-    }
+  if (strcmp((*root)->key, key) > 0) {
+    // Rekurzivní volání pro vložení do levého podstromu
+    err = avl_insert(&(*root)->left, key, value);
+    CHECK_ERR_RET(err);
+  } else if (strcmp((*root)->key, key) < 0) {
+    // Rekurzivní volání pro vložení do pravého podstromu
+    err = avl_insert(&(*root)->right, key, value);
+    CHECK_ERR_RET(err);
   } else {
     // Pokud klíč již existuje, vrátíme chybu
     LOG_ERR(IFJ_EINTERNAL, "Key already exists: %s", key);
     return IFJ_EINTERNAL;
   }
 
+  // Aktualizace vyvážení uzlu
+  (*root)->height = height(*root);
   return IFJ_SUCCESS;
 }
 
 IFJ_ERR symtable_insert(symtable_t *table, const char *key,
                         const symtable_data_t *value) {
-  avl_node_t *new_node;
   IFJ_ERR err;
 
   // Kontrola proti NULL pointeru
@@ -119,24 +136,30 @@ IFJ_ERR symtable_insert(symtable_t *table, const char *key,
     return IFJ_EINTERNAL;
   }
 
-  // Pokud je strom prázdný, vytvoříme nový uzel a přiřadíme ho jako kořen
-  // stromu
-  if (!table->root) {
-    err = create_node(key, value, &new_node);
-    CHECK_ERR_RET(err);
-    table->root = new_node;
-    return IFJ_SUCCESS;
-  }
-
-  // Pokud strom není prázdný, vložíme nový uzel do stromu
-  err = avl_insert(table->root, key, value);
+  // Vložení prvku do stromu
+  err = avl_insert(&table->root, key, value);
   CHECK_ERR_LOG_RET(err, "Failed to insert node with key: %s", key);
 
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro rekurzivní vyhledání uzlu v AVL stromu.
+ * @param root Ukazatel na kořenový uzel stromu nebo podstromu.
+ * @param key Klíč uzlu.
+ * @param value Ukazatel na hodnotu uzlu.
+ * @return IFJ_EINTERNAL pokud prvek neexistuje.
+ * @return IFJ_SUCCESS při úspěšném vyhledání.
+ */
 static IFJ_ERR avl_find(avl_node_t *root, const char *key,
                         symtable_data_t **value) {
+  // Pokud je strom prázdný, vrátíme chybu
+  if (!root) {
+    return IFJ_EINTERNAL;
+  }
+
+  // Porovnání klíče s klíčem kořene a rekurzivní vyhledání v levém nebo pravém
+  // podstromu
   if (strcmp(root->key, key) > 0) {
     if (root->left) {
       return avl_find(root->left, key, value);
@@ -202,3 +225,55 @@ IFJ_ERR symtable_destroy(symtable_t *table) {
 
   return IFJ_SUCCESS;
 }
+
+#ifdef DEBUG
+
+static void print_tree_keys(avl_node_t *root) {
+  if (root) {
+    printf("%s", root->key);
+    print_tree_keys(root->left);
+    print_tree_keys(root->right);
+  }
+}
+
+static void print_tree_data(avl_node_t *root) {
+  if (root) {
+    printf("%d", root->data.cislo);
+    print_tree_data(root->left);
+    print_tree_data(root->right);
+  }
+}
+
+int main() {
+  IFJ_ERR err;
+  symtable_t *table = NULL;
+  int cisla[] = {1, 2, 3, 4, 5};
+  char *keys[] = {"g", "e", "a", "f", "j"};
+  symtable_data_t data, *found_data;
+
+  err = symtable_init(&table);
+  CHECK_ERR_RET(err);
+
+  for (int i = 0; i < 5; i++) {
+    data.cislo = cisla[i];
+    err = symtable_insert(table, keys[i], &data);
+    CHECK_ERR_RET(err);
+    print_tree_keys(table->root);
+    printf("\n");
+  }
+
+  print_tree_data(table->root);
+  printf("\n");
+
+  symtable_find(table, "a", &found_data);
+  printf("Key: %s, data: %d\n", "a", found_data->cislo);
+  found_data->cislo = 10;
+
+  symtable_find(table, "b", &found_data);
+  printf("Key: %s, data: %d\n", "b", found_data->cislo);
+
+  err = symtable_destroy(&table);
+  return err;
+}
+
+#endif
