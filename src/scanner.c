@@ -174,10 +174,129 @@ IFJ_ERR scanner_next_token(token_t *token) {
         line++;
         return IFJ_SUCCESS;
 
+      case '<':
+        state = STATE_LT;
+        break;
+
+      case '>':
+        state = STATE_GT;
+        break;
+
+      case '=':
+        state = STATE_ASSIGN;
+        break;
+
+      case '!':
+        state = STATE_NOT;
+        break;
+
+      case '+':
+        state = STATE_PLUS;
+        break;  
+
+      case '&':
+        state = STATE_AMP;
+        break;
+        
+      case '|':
+        state = STATE_PIPE;
+        break;
+
       default:
         return IFJ_ELEX;
       }
       break;
+
+    case STATE_LT:
+      switch (c)
+      {
+      case '=':
+        token->type = TOK_LEQ;
+        return IFJ_SUCCESS;
+
+      case '-':
+        token->type = TOK_LARROW;
+        return IFJ_SUCCESS;
+      
+      default:
+        ungetc(c, input);
+        token->type = TOK_LT;
+        return IFJ_SUCCESS;
+      }
+
+      case STATE_GT:
+      switch (c)
+      {
+      case '=':
+        token->type = TOK_GEQ;
+        return IFJ_SUCCESS;
+
+      default:
+        ungetc(c, input);
+        token->type = TOK_GT;
+        return IFJ_SUCCESS;
+      }
+
+      case STATE_ASSIGN:
+      switch (c)
+      {
+      case '=':
+        token->type = TOK_EQ;
+        return IFJ_SUCCESS;
+
+      default:
+        ungetc(c, input);
+        token->type = TOK_ASSIGN;
+        return IFJ_SUCCESS;
+      }
+
+      case STATE_NOT:
+      switch (c)
+      {
+      case '=':
+        token->type = TOK_NEQ;
+        return IFJ_SUCCESS;
+
+      default:
+        ungetc(c, input);
+        token->type = TOK_NOT;
+        return IFJ_SUCCESS;
+      }
+
+      case STATE_PLUS:
+      switch (c)
+      {
+      case '+':
+        token->type = TOK_CONCAT;
+        return IFJ_SUCCESS; 
+      
+        default:
+        ungetc(c, input);
+        token->type = TOK_ADD;
+        return IFJ_SUCCESS;
+      }
+
+      case STATE_AMP:
+      switch (c)
+      {
+      case '&':
+        token->type = TOK_AND;
+        return IFJ_SUCCESS; 
+
+        default:
+        return IFJ_ELEX;
+      }
+
+      case STATE_PIPE:
+      switch (c)
+      {
+      case '|':
+        token->type = TOK_OR;
+        return IFJ_SUCCESS; 
+
+        default:
+        return IFJ_ELEX;
+      }
 
     default:
       return IFJ_EINTERNAL;
