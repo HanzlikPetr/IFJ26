@@ -38,6 +38,9 @@ $(TARGET): $(SRCS_OBJS)
 # Pravidla pro kompilaci testů
 #---------------------------------------------------
 test: $(TEST_TARGETS)
+	@echo ""
+	@echo "Running tests without Valgrind..."
+	@echo ""
 	@for test in $(TEST_TARGETS); do \
 		echo "Running test: $$test";\
 		./$$test || exit 1;\
@@ -54,6 +57,13 @@ test: $(TEST_TARGETS)
 
 $(TEST_TARGETS): utest_%: ./tests/utest/test_%.o $(TEST_SRCS_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(TEST_LDLIBS)
+
+test-format:
+	@echo ""
+	@echo "Running format check with clang-format, if there are any errors, please run 'make format' to fix them. If there are no errors, the output will be empty."
+	@echo ""
+	@ find . -type f \( -name "*.c" -o -name "*.h" \) \
+            -exec clang-format --style=file --dry-run --Werror {} +
 
 #---------------------------------------------------
 # Pravidlo pro formátování kódu
