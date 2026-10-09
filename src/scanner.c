@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "error.h"
 #include "scanner.h"
@@ -116,8 +117,70 @@ void token_free(token_t *token) {
 }
 
 IFJ_ERR scanner_next_token(token_t *token) {
-  // Inicializace tokenu
-  token->type = TOK_EOF;
+  scanner_state_t state = STATE_START;
   token->line = line;
-  return IFJ_SUCCESS;
+
+  while (true) {
+    int c = fgetc(input);
+
+    switch (state) {
+    case STATE_START:
+      switch (c) {
+      case ' ':
+        break;
+
+      case '(':
+        token->type = TOK_LPAREN;
+        return IFJ_SUCCESS;
+
+      case ')':
+        token->type = TOK_RPAREN;
+        return IFJ_SUCCESS;
+
+      case '[':
+        token->type = TOK_LBRACKET;
+        return IFJ_SUCCESS;
+
+      case ']':
+        token->type = TOK_RBRACKET;
+        return IFJ_SUCCESS;
+
+      case ',':
+        token->type = TOK_COMMA;
+        return IFJ_SUCCESS;
+
+      case ':':
+        token->type = TOK_COLON;
+        return IFJ_SUCCESS;
+
+      case ';':
+        token->type = TOK_SEMICOLON;
+        return IFJ_SUCCESS;
+
+      case '-':
+        token->type = TOK_SUB;
+        return IFJ_SUCCESS;
+
+      case '*':
+        token->type = TOK_MUL;
+        return IFJ_SUCCESS;
+
+      case EOF:
+        token->type = TOK_EOF;
+        return IFJ_SUCCESS;
+
+      case '\n':
+        token->type = TOK_EOL;
+        line++;
+        return IFJ_SUCCESS;
+
+      default:
+        return IFJ_ELEX;
+      }
+      break;
+
+    default:
+      return IFJ_EINTERNAL;
+    }
+  }
 }
