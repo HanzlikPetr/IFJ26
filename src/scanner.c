@@ -105,6 +105,7 @@ static int *indent_stack = NULL; // Zásobník úrovní odsazení, dno je 0.
 static int indent_top = 0;       // Index vrcholu zásobníku.
 static int indent_cap = 0;       // Kapacita zásobníku.
 static int line_indent = 0; // Počet mezer na začátku aktuálního řádku.
+static int pending_dedents = 0; // Kolik dedentů ještě zbývá vrátit
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
@@ -123,6 +124,7 @@ IFJ_ERR scanner_init(FILE *file) {
   at_line_start = true;
   paren_depth = 0;
   line_indent = 0;
+  pending_dedents = 0;
   return IFJ_SUCCESS;
 }
 
@@ -167,6 +169,13 @@ IFJ_ERR scanner_next_token(token_t *token) {
     token->type = TOK_DOT;
     return IFJ_SUCCESS;
   }
+    // Zbývající dedenty z minulého volání.
+  if (pending_dedents > 0) {
+    pending_dedents--;
+    token->line = line;
+    token->type = TOK_DEDENT;
+    return IFJ_SUCCESS;
+  }
 
   scanner_state_t state = STATE_START;
   dstring_t str;
@@ -194,7 +203,21 @@ IFJ_ERR scanner_next_token(token_t *token) {
             token->type = TOK_INDENT;
             return IFJ_SUCCESS;
           }
-          // Menší odsazení
+          if (line_indent < current) {
+            // Menší odsazení - konec bloku
+            int count = 0;
+            while (indent_stack[indent_top] > line_indent) {
+              indent_top--;
+              count++;
+            }
+            if (indent_stack[indent_top] != line_indent) {
+              return IFJ_ELEX; // Odsazení neodpovídá žádné úrovni
+            }
+            ungetc(c, input);
+            pending_dedents = count - 1; // Jeden vracíme hned.
+            token->type = TOK_DEDENT;
+            return IFJ_SUCCESS;
+          }
         }
         at_line_start = false;
       }
