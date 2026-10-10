@@ -96,16 +96,16 @@ static const char *const keywords[] = {
 #define INDENT_STACK_INIT_CAP 16 // Počáteční kapacita zásobníku odsazení
 
 // Vnitřní stav scanneru
-static FILE *input = NULL;  // Vstupní soubor
-static int line = 1;        // Číslo aktuálního řádku
-static bool pending_dot = false; // Příští token je tečka (1.)
+static FILE *input = NULL;        // Vstupní soubor
+static int line = 1;              // Číslo aktuálního řádku
+static bool pending_dot = false;  // Příští token je tečka (1.)
 static bool at_line_start = true; // Od posledního '\n' byly jen mezery
-static int paren_depth = 0; // Počet otevřených závorek ( a [
-static int *indent_stack = NULL; // Zásobník úrovní odsazení, dno je 0.
-static int indent_top = 0;       // Index vrcholu zásobníku.
-static int indent_cap = 0;       // Kapacita zásobníku.
-static int line_indent = 0; // Počet mezer na začátku aktuálního řádku.
-static int pending_dedents = 0; // Kolik dedentů ještě zbývá vrátit
+static int paren_depth = 0;       // Počet otevřených závorek ( a [
+static int *indent_stack = NULL;  // Zásobník úrovní odsazení, dno je 0.
+static int indent_top = 0;        // Index vrcholu zásobníku.
+static int indent_cap = 0;        // Kapacita zásobníku.
+static int line_indent = 0;       // Počet mezer na začátku aktuálního řádku.
+static int pending_dedents = 0;   // Kolik dedentů ještě zbývá vrátit
 static bool expect_line_end =
     false; // Po víceřádkovém komentáři může být jen konec řádku
 
@@ -166,13 +166,13 @@ void token_free(token_t *token) {
 }
 
 IFJ_ERR scanner_next_token(token_t *token) {
-  if (pending_dot) {  // případ "1.", zbyla tečka
+  if (pending_dot) { // případ "1.", zbyla tečka
     pending_dot = false;
     token->line = line;
     token->type = TOK_DOT;
     return IFJ_SUCCESS;
   }
-    // Zbývající dedenty z minulého volání.
+  // Zbývající dedenty z minulého volání.
   if (pending_dedents > 0) {
     pending_dedents--;
     token->line = line;
