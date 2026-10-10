@@ -601,6 +601,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
         state = STATE_EXP;
       }
+      else if (c == 'd' || c == 'D') {
+        token->type = TOK_FLOAT;
+        token->value.double_value = strtod(str.data, NULL);
+        dstring_free(&str);
+        return IFJ_SUCCESS;
+      }
 
       else {
         ungetc(c, input);
@@ -699,7 +705,14 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
       } else if (c == '_') {
         state = STATE_EXP_UNDERSCORE;
-      } else {
+      } 
+      else if (c == 'd' || c == 'D') {
+        token->type = TOK_FLOAT;
+        token->value.double_value = strtod(str.data, NULL);
+        dstring_free(&str);
+        return IFJ_SUCCESS;
+      }
+      else {
         ungetc(c, input);
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
