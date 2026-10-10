@@ -106,6 +106,8 @@ static int indent_top = 0;       // Index vrcholu zásobníku.
 static int indent_cap = 0;       // Kapacita zásobníku.
 static int line_indent = 0; // Počet mezer na začátku aktuálního řádku.
 static int pending_dedents = 0; // Kolik dedentů ještě zbývá vrátit
+static bool expect_line_end =
+    false; // Po víceřádkovém komentáři může být jen konec řádku
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
@@ -125,6 +127,7 @@ IFJ_ERR scanner_init(FILE *file) {
   paren_depth = 0;
   line_indent = 0;
   pending_dedents = 0;
+  expect_line_end = false;
   return IFJ_SUCCESS;
 }
 
@@ -180,6 +183,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
   scanner_state_t state = STATE_START;
   dstring_t str;
   int comment_depth = 0;
+  bool comment_newline = false; // Obsahuje komentář '\n'
 
   while (true) {
     int c = fgetc(input);
@@ -189,6 +193,9 @@ IFJ_ERR scanner_next_token(token_t *token) {
       token->line = line;
 
       if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
+        if (expect_line_end) {
+          return IFJ_ELEX; // Token za víceřádkovým komentářem.
+        }
         if (at_line_start) {
           at_line_start = false;
           int current = indent_stack[indent_top];
@@ -236,7 +243,9 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case ')':
         token->type = TOK_RPAREN;
-        paren_depth--;
+        if (paren_depth > 0) {
+          paren_depth--;
+        }
         return IFJ_SUCCESS;
 
       case '[':
@@ -246,7 +255,9 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case ']':
         token->type = TOK_RBRACKET;
-        paren_depth--;
+        if (paren_depth > 0) {
+          paren_depth--;
+        }
         return IFJ_SUCCESS;
 
       case ',':
@@ -287,6 +298,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       case '\n':
+        expect_line_end = false;
         line++;
         if (paren_depth == 0) {
           line_indent = 0;
@@ -514,6 +526,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '*':
         comment_depth = 1;
+        comment_newline = false;
         state = STATE_BLOCK_COMMENT;
         break;
 
@@ -544,6 +557,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '\n':
         line++;
+        comment_newline = true;
         break;
 
       case EOF:
@@ -560,6 +574,16 @@ IFJ_ERR scanner_next_token(token_t *token) {
         comment_depth--;
         if (comment_depth == 0) {
           state = STATE_START;
+          // Komentář s '\n' jako konec řádku
+          if (comment_newline && paren_depth == 0) {
+            expect_line_end = true;
+            line_indent = 0;
+            if (!at_line_start) {
+              at_line_start = true;
+              token->type = TOK_EOL;
+              return IFJ_SUCCESS;
+            }
+          }
         } else {
           state = STATE_BLOCK_COMMENT;
         }
@@ -570,6 +594,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '\n':
         line++;
+        comment_newline = true;
         state = STATE_BLOCK_COMMENT;
         break;
 
@@ -594,6 +619,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '\n':
         line++;
+        comment_newline = true;
         state = STATE_BLOCK_COMMENT;
         break;
 
