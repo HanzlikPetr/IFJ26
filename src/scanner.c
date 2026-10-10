@@ -122,14 +122,15 @@ void token_free(token_t *token) {
 
 IFJ_ERR scanner_next_token(token_t *token) {
   scanner_state_t state = STATE_START;
-  token->line = line;
   dstring_t str;
+  int comment_depth = 0;
 
   while (true) {
     int c = fgetc(input);
 
     switch (state) {
     case STATE_START:
+      token->line = line;
       switch (c) {
       case ' ':
         break;
@@ -351,6 +352,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       case '*':
+        comment_depth = 1;
         state = STATE_BLOCK_COMMENT;
         break;
 
@@ -365,6 +367,80 @@ IFJ_ERR scanner_next_token(token_t *token) {
       if (c == '\n' || c == EOF) {
         ungetc(c, input);
         state = STATE_START;
+      }
+      break;
+
+    case STATE_BLOCK_COMMENT:
+      switch (c) {
+      case '*':
+        state = STATE_BLOCK_COMMENT_STAR;
+        break;
+
+      case '/':
+        state = STATE_BLOCK_COMMENT_SLASH;
+        break;
+
+      case '\n':
+        line++;
+        break;
+
+      case EOF:
+        return IFJ_ELEX;
+
+      default:
+        break;
+      }
+      break;
+
+    case STATE_BLOCK_COMMENT_STAR:
+      switch (c) {
+      case '/':
+        comment_depth--;
+        if (comment_depth == 0) {
+          state = STATE_START;
+        } else {
+          state = STATE_BLOCK_COMMENT;
+        }
+        break;
+
+      case '*':
+        break;
+
+      case '\n':
+        line++;
+        state = STATE_BLOCK_COMMENT;
+        break;
+
+      case EOF:
+        return IFJ_ELEX;
+
+      default:
+        state = STATE_BLOCK_COMMENT;
+        break;
+      }
+      break;
+
+    case STATE_BLOCK_COMMENT_SLASH:
+      switch (c) {
+      case '*':
+        comment_depth++;
+        state = STATE_BLOCK_COMMENT;
+        break;
+
+      case '/':
+        break;
+
+      case '\n':
+        line++;
+        state = STATE_BLOCK_COMMENT;
+        break;
+
+      case EOF:
+        return IFJ_ELEX;
+
+      default:
+        state = STATE_BLOCK_COMMENT;
+        break;
       }
       break;
 
