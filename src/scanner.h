@@ -77,7 +77,7 @@ typedef enum {
   TOK_SEMICOLON,
 
   TOK_CONCAT,
-  TOK_LARROW, // <-
+  TOK_LARROW,     // <-
   TOK_ANNOT_MAIN, // @main
 
   TOK_INDENT, // začátek odsazení
