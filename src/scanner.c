@@ -96,18 +96,27 @@ static const char *const keywords[] = {
 #define INDENT_STACK_INIT_CAP 16 // Počáteční kapacita zásobníku odsazení
 
 // Vnitřní stav scanneru
-static FILE *input = NULL;        // Vstupní soubor
-static int line = 1;              // Číslo aktuálního řádku
-static bool pending_dot = false;  // Příští token je tečka (1.)
-static bool at_line_start = true; // Od posledního '\n' byly jen mezery
-static int paren_depth = 0;       // Počet otevřených závorek ( a [
-static int *indent_stack = NULL;  // Zásobník úrovní odsazení, dno je 0.
-static int indent_top = 0;        // Index vrcholu zásobníku.
-static int indent_cap = 0;        // Kapacita zásobníku.
-static int line_indent = 0;       // Počet mezer na začátku aktuálního řádku.
-static int pending_dedents = 0;   // Kolik dedentů ještě zbývá vrátit
-static bool expect_line_end =
-    false; // Po víceřádkovém komentáři může být jen konec řádku
+static FILE *input = NULL;
+/// Číslo aktuálního řádku.
+static int line = 1;
+/// Příští token je tečka (po "1.").
+static bool pending_dot = false;
+/// Od posledního '\n' byly jen mezery.
+static bool at_line_start = true;
+/// Počet otevřených závorek ( a [.
+static int paren_depth = 0;
+/// Zásobník úrovní odsazení, dno je 0.
+static int *indent_stack = NULL;
+/// Index vrcholu zásobníku odsazení.
+static int indent_top = 0;
+/// Kapacita zásobníku odsazení.
+static int indent_cap = 0;
+/// Počet mezer na začátku aktuálního řádku.
+static int line_indent = 0;
+/// Kolik DEDENTů ještě zbývá vrátit.
+static int pending_dedents = 0;
+/// Po víceřádkovém komentáři smí být jen konec řádku.
+static bool expect_line_end = false;
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
