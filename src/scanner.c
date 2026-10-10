@@ -213,6 +213,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       default:
+        // Písmena
         if (isalpha(c) || c == '_') {
           IFJ_ERR err = dstring_init(&str);
           if (err != IFJ_SUCCESS) {
@@ -227,6 +228,25 @@ IFJ_ERR scanner_next_token(token_t *token) {
           state = STATE_ID;
           break;
         }
+        // Čísla
+        if (isdigit(c)) {
+          IFJ_ERR err = dstring_init(&str);
+          if (err != IFJ_SUCCESS) {
+            return err;
+          }
+          err = dstring_append(&str, (char)c);
+          if (err != IFJ_SUCCESS) {
+            dstring_free(&str);
+            return err;
+          }
+          if (c == '0') {
+            state = STATE_ZERO;
+          } else {
+            state = STATE_INT;
+          }
+          break;
+        }
+
         return IFJ_ELEX;
       }
       break;
@@ -443,6 +463,39 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
       }
       break;
+
+    case STATE_INT:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+      } else {
+        ungetc(c, input);
+
+        token->type = TOK_INT;
+        token->value.int_value = strtoll(str.data, NULL, 10);
+
+        dstring_free(&str);
+        return IFJ_SUCCESS;
+      }
+
+      break;
+
+    case STATE_ZERO:
+      if (isdigit(c)) {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+
+      else {
+        ungetc(c, input);
+        token->type = TOK_INT;
+        token->value.int_value = 0;
+        dstring_free(&str);
+        return IFJ_SUCCESS;
+      }
 
     default:
       return IFJ_EINTERNAL;
