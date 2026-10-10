@@ -18,13 +18,13 @@ typedef enum {
   IFJ_SUCCESS = 0,     /**< Úspěšný průběh */
   IFJ_ELEX = 1,        /**< Chyba lexikální analýzy */
   IFJ_ESYNTAX = 2,     /**< Chyba syntaktické analýzy */
-  IFJ_ESEM_UNDEF = 3,  /**< Nedefinovaná funkce/proměnná/typ, chybějící @main */
-  IFJ_ESEM_REDEF = 4,  /**< Nepovolená redefinice funkce/proměnné/typu */
-  IFJ_ESEM_ARGS = 5,   /**< Špatný počet/typ argumentů, parametry @main */
-  IFJ_ESEM_TYPE = 6,   /**< Typová kompatibilita/odvození typu */
-  IFJ_ESEM_IMMUT = 7,  /**< Zápis do nemodifikovatelné proměnné/parametru */
+  IFJ_ESEM_UNDEF = 3, /**< Nedefinovaná funkce/proměnná/typ, chybějící @main */
+  IFJ_ESEM_REDEF = 4, /**< Nepovolená redefinice funkce/proměnné/typu */
+  IFJ_ESEM_ARGS = 5, /**< Špatný počet/typ argumentů, parametry @main */
+  IFJ_ESEM_TYPE = 6, /**< Typová kompatibilita/odvození typu */
+  IFJ_ESEM_IMMUT = 7, /**< Zápis do nemodifikovatelné proměnné/parametru */
   IFJ_ESEM_OTHER = 10, /**< Ostatní sémantické chyby */
-  IFJ_EINTERNAL = 99   /**< Interní chyba překladače */
+  IFJ_EINTERNAL = 99 /**< Interní chyba překladače */
 } IFJ_ERR;
 
 /**
