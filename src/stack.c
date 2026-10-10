@@ -32,7 +32,7 @@ struct stack {
  *
  * @param stack Zásobník, který se má inicializovat.
  */
-static IFJ_ERR stack_init(stack_t *stack) {
+IFJ_ERR stack_init(stack_t *stack) {
   CHECK_ARG_NULL_RET(stack);
 
   stack->top = NULL;
@@ -45,7 +45,7 @@ static IFJ_ERR stack_init(stack_t *stack) {
  *
  * @param stack Zásobník, který se má uvolnit.
  */
-static IFJ_ERR stack_dtor(stack_t *stack) {
+IFJ_ERR stack_dtor(stack_t *stack) {
   CHECK_ARG_NULL_RET(stack);
 
   stack_elem_t *top;
@@ -65,7 +65,7 @@ static IFJ_ERR stack_dtor(stack_t *stack) {
  * @param stack Zásobník, který se kontroluje.
  * @param is_empty Proměnná, která zachycuje výsledek.
  */
-static IFJ_ERR stack_is_empty(stack_t *stack, bool *is_empty) {
+IFJ_ERR stack_is_empty(stack_t *stack, bool *is_empty) {
   CHECK_ARGS_NULL_RET(stack, is_empty);
   *is_empty = (stack->top == NULL);
 
@@ -78,7 +78,7 @@ static IFJ_ERR stack_is_empty(stack_t *stack, bool *is_empty) {
  * @param stack Zásobník, na který se vkládá.
  * @param data Hodnota, která se zapisuje na zásobník.
  */
-static IFJ_ERR stack_push(stack_t *stack, void *data) {
+IFJ_ERR stack_push(stack_t *stack, void *data) {
   CHECK_ARGS_NULL_RET(stack, data);
 
   stack_elem_t *new_elem_ptr = malloc(sizeof(stack_elem_t));
@@ -97,7 +97,7 @@ static IFJ_ERR stack_push(stack_t *stack, void *data) {
  * @param stack Zásobník, jehož vrchol se ukazuje.
  * @param data_out Hodnota, kam se vrchol zapisuje.
  */
-static IFJ_ERR stack_top(stack_t *stack, void **data_out) {
+IFJ_ERR stack_top(stack_t *stack, void **data_out) {
   CHECK_ARGS_NULL_RET(stack, data_out);
 
   *data_out = stack->top->data;
@@ -110,7 +110,7 @@ static IFJ_ERR stack_top(stack_t *stack, void **data_out) {
  * @param stack Zásobník, ze kterého se odstraňuje.
  * @param data_out Hodnota, která zachycuje odstraňovaný vrchol.
  */
-static IFJ_ERR stack_pop(stack_t *stack, void **data_out) {
+IFJ_ERR stack_pop(stack_t *stack, void **data_out) {
   IFJ_ERR err = stack_top(stack, data_out);
   CHECK_ERR_RET(err);
 
