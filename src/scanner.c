@@ -212,6 +212,10 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_SLASH;
         break;
 
+      case '.':
+        state = STATE_DOT;
+        break;
+
       default:
         // Písmena
         if (isalpha(c) || c == '_') {
@@ -581,6 +585,33 @@ IFJ_ERR scanner_next_token(token_t *token) {
       } else {
         dstring_free(&str);
         return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_DOT:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_init(&str);
+        if (err != IFJ_SUCCESS) {
+          return err;
+        }
+        err = dstring_append(&str, '.');
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+
+        err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+
+        state = STATE_DOUBLE;
+
+      } else {
+        ungetc(c, input);
+        token->type = TOK_DOT;
+        return IFJ_SUCCESS;
       }
       break;
 
