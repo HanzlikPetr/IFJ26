@@ -270,6 +270,19 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       case EOF:
+        if (!at_line_start) {
+          at_line_start = true;
+          token->type = TOK_EOL;
+          return IFJ_SUCCESS;
+        }
+
+        if (indent_top > 0) {
+          pending_dedents = indent_top - 1;
+          indent_top = 0;
+          token->type = TOK_DEDENT;
+          return IFJ_SUCCESS;
+        }
+
         token->type = TOK_EOF;
         return IFJ_SUCCESS;
 
