@@ -225,6 +225,15 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_DOT;
         break;
 
+      case '"': {
+        IFJ_ERR err = dstring_init(&str);
+        if (err != IFJ_SUCCESS) {
+          return err;
+        }
+        state = STATE_QUOTE;
+        break;
+      }
+
       default:
         // Písmena
         if (isalpha(c) || c == '_') {
@@ -600,8 +609,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
           return err;
         }
         state = STATE_EXP;
-      }
-      else if (c == 'd' || c == 'D') {
+      } else if (c == 'd' || c == 'D') {
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
         dstring_free(&str);
@@ -705,14 +713,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
       } else if (c == '_') {
         state = STATE_EXP_UNDERSCORE;
-      } 
-      else if (c == 'd' || c == 'D') {
+      } else if (c == 'd' || c == 'D') {
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
         dstring_free(&str);
         return IFJ_SUCCESS;
-      }
-      else {
+      } else {
         ungetc(c, input);
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
@@ -735,6 +741,40 @@ IFJ_ERR scanner_next_token(token_t *token) {
       } else {
         dstring_free(&str);
         return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_QUOTE:
+      if (c == '"') {
+        token->type = TOK_STRING;
+        token->value.str_value = str.data;
+        return IFJ_SUCCESS;
+
+      } else {
+        ungetc(c, input);
+        state = STATE_STRING;
+      }
+      break;
+
+    case STATE_STRING:
+      if (c == '"') {
+        token->type = TOK_STRING;
+        token->value.str_value = str.data;
+        return IFJ_SUCCESS;
+
+      } else if (c == '\n' || c == EOF) {
+        dstring_free(&str);
+        return IFJ_ELEX;
+
+      } else if (c == '\\') {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      } else {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
       }
       break;
 
