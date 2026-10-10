@@ -821,6 +821,71 @@ IFJ_ERR scanner_next_token(token_t *token) {
       }
       break;
 
+    case STATE_ML_STRING:
+      if (c == '"') {
+        state = STATE_ML_STRING_Q1;
+
+      } else if (c == EOF) {
+        dstring_free(&str);
+        return IFJ_ELEX;
+
+      } else {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        if (c == '\n') {
+          line++;
+        }
+      }
+      break;
+
+    case STATE_ML_STRING_Q1:
+      if (c == '"') {
+        state = STATE_ML_STRING_Q2;
+      } else if (c == EOF) {
+        dstring_free(&str);
+        return IFJ_ELEX;
+
+      } else {
+        IFJ_ERR err = dstring_append(&str, '"');
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        ungetc(c, input);
+        state = STATE_ML_STRING;
+      }
+      break;
+
+    case STATE_ML_STRING_Q2:
+      if (c == '"') {
+        token->type = TOK_STRING;
+        token->value.str_value = str.data;
+        return IFJ_SUCCESS;
+
+      } else if (c == EOF) {
+        dstring_free(&str);
+        return IFJ_ELEX;
+
+      } else {
+        IFJ_ERR err = dstring_append(&str, '"');
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+
+        err = dstring_append(&str, '"');
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        ungetc(c, input);
+        state = STATE_ML_STRING;
+      }
+      break;
+
     default:
       return IFJ_EINTERNAL;
     }
