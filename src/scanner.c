@@ -97,6 +97,7 @@ static const char *const keywords[] = {
 // Vnitřní stav scanneru
 static FILE *input = NULL;  // Vstupní soubor
 static int line = 1;        // Číslo aktuálního řádku
+static bool pending_dot = false; // Příští token je tečka (1.)
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
@@ -105,6 +106,7 @@ IFJ_ERR scanner_init(FILE *file) {
   }
   input = file;
   line = 1;
+  pending_dot = false;
   return IFJ_SUCCESS;
 }
 
@@ -121,6 +123,13 @@ void token_free(token_t *token) {
 }
 
 IFJ_ERR scanner_next_token(token_t *token) {
+  if (pending_dot) {  // případ "1.", zbyla tečka
+    pending_dot = false;
+    token->line = line;
+    token->type = TOK_DOT;
+    return IFJ_SUCCESS;
+  }
+
   scanner_state_t state = STATE_START;
   dstring_t str;
   int comment_depth = 0;
@@ -548,8 +557,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
         state = STATE_DOUBLE;
       } else {
+        ungetc(c, input);
+        pending_dot = true;
+        token->type = TOK_INT;
+        token->value.int_value = strtoll(str.data, NULL, 10);
         dstring_free(&str);
-        return IFJ_ELEX;
+        return IFJ_SUCCESS;
       }
       break;
 
