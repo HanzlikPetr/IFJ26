@@ -767,8 +767,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_ELEX;
 
       } else if (c == '\\') {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        state = STATE_STRING_ESCAPE;
+
       } else {
         IFJ_ERR err = dstring_append(&str, (char)c);
         if (err != IFJ_SUCCESS) {
@@ -777,6 +777,39 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
       }
       break;
+
+    case STATE_STRING_ESCAPE: {
+      char decoded;
+      switch (c) {
+      case '\\':
+        decoded = '\\';
+        break;
+      case '"':
+        decoded = '"';
+        break;
+      case 'n':
+        decoded = '\n';
+        break;
+      case 'r':
+        decoded = '\r';
+        break;
+      case 't':
+        decoded = '\t';
+        break;
+      default:
+        // neznámá escape sekvence
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+
+      IFJ_ERR err = dstring_append(&str, decoded);
+      if (err != IFJ_SUCCESS) {
+        dstring_free(&str);
+        return err;
+      }
+      state = STATE_STRING;
+      break;
+    }
 
     default:
       return IFJ_EINTERNAL;
