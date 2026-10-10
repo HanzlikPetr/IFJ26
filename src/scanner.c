@@ -234,6 +234,10 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
       }
 
+      case '@':
+        state = STATE_AT;
+        break;
+
       default:
         // Písmena
         if (isalpha(c) || c == '_') {
@@ -883,6 +887,45 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
         ungetc(c, input);
         state = STATE_ML_STRING;
+      }
+      break;
+
+    case STATE_AT:
+      if (isalpha(c)) {
+        // Za @ začíná jméno anotace.
+        IFJ_ERR err = dstring_init(&str);
+        if (err != IFJ_SUCCESS) {
+          return err;
+        }
+        err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_AT_ID;
+      } else {
+        return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_AT_ID:
+      if (isalnum(c) || c == '_') {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+      } else {
+        // Jméno skončilo, jediná povolená anotace je @main.
+        ungetc(c, input);
+        bool is_main = strcmp(str.data, "main") == 0;
+        dstring_free(&str);
+
+        if (!is_main) {
+          return IFJ_ELEX;
+        }
+        token->type = TOK_ANNOT_MAIN;
+        return IFJ_SUCCESS;
       }
       break;
 
