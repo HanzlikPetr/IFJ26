@@ -477,6 +477,15 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_INT_UNDERSCORE;
       }
 
+      else if (c == '.') {
+        IFJ_ERR err = dstring_append(&str, '.');
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_INT_DOT;
+      }
+
       else {
         ungetc(c, input);
 
@@ -510,15 +519,70 @@ IFJ_ERR scanner_next_token(token_t *token) {
       if (isdigit(c) || c == '_') {
         dstring_free(&str);
         return IFJ_ELEX;
-      }
-
-      else {
+      } else if (c == '.') {
+        IFJ_ERR err = dstring_append(&str, '.');
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_INT_DOT;
+      } else {
         ungetc(c, input);
         token->type = TOK_INT;
         token->value.int_value = 0;
         dstring_free(&str);
         return IFJ_SUCCESS;
       }
+      break;
+
+    case STATE_INT_DOT:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_DOUBLE;
+      } else {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_DOUBLE:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+      } else if (c == '_') {
+        state = STATE_DOUBLE_UNDERSCORE;
+      } else {
+        ungetc(c, input);
+        token->type = TOK_FLOAT;
+        token->value.double_value = strtod(str.data, NULL);
+        dstring_free(&str);
+        return IFJ_SUCCESS;
+      }
+      break;
+
+    case STATE_DOUBLE_UNDERSCORE:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_DOUBLE;
+
+      } else if (c == '_') {
+        // zůstáváme, další podtržítko
+      } else {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+      break;
 
     default:
       return IFJ_EINTERNAL;
