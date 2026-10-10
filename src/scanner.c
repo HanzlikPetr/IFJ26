@@ -5,10 +5,13 @@
  * @author xjurokv00 Vojtěch Jurok
  */
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "dstring.h"
 #include "error.h"
 #include "scanner.h"
 
@@ -89,6 +92,7 @@ static const char *const keywords[] = {
     [KW_EXTENSION] = "extension",
     [KW_TYPE] = "type",
 };
+#define KEYWORD_COUNT (sizeof keywords / sizeof keywords[0])
 
 // Vnitřní stav scanneru
 static FILE *input = NULL;  // Vstupní soubor
@@ -119,6 +123,7 @@ void token_free(token_t *token) {
 IFJ_ERR scanner_next_token(token_t *token) {
   scanner_state_t state = STATE_START;
   token->line = line;
+  dstring_t str;
 
   while (true) {
     int c = fgetc(input);
@@ -192,114 +197,151 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '+':
         state = STATE_PLUS;
-        break;  
+        break;
 
       case '&':
         state = STATE_AMP;
         break;
-        
+
       case '|':
         state = STATE_PIPE;
         break;
 
       default:
+        if (isalpha(c) || c == '_') {
+          IFJ_ERR err = dstring_init(&str);
+          if (err != IFJ_SUCCESS) {
+            return err;
+          }
+
+          err = dstring_append(&str, (char)c);
+          if (err != IFJ_SUCCESS) {
+            dstring_free(&str);
+            return err;
+          }
+          state = STATE_ID;
+          break;
+        }
         return IFJ_ELEX;
       }
       break;
 
-    case STATE_LT:
-      switch (c)
-      {
-      case '=':
-        token->type = TOK_LEQ;
-        return IFJ_SUCCESS;
+      case STATE_LT:
+        switch (c) {
+        case '=':
+          token->type = TOK_LEQ;
+          return IFJ_SUCCESS;
 
-      case '-':
-        token->type = TOK_LARROW;
-        return IFJ_SUCCESS;
-      
-      default:
-        ungetc(c, input);
-        token->type = TOK_LT;
-        return IFJ_SUCCESS;
-      }
+        case '-':
+          token->type = TOK_LARROW;
+          return IFJ_SUCCESS;
+
+        default:
+          ungetc(c, input);
+          token->type = TOK_LT;
+          return IFJ_SUCCESS;
+        }
 
       case STATE_GT:
-      switch (c)
-      {
-      case '=':
-        token->type = TOK_GEQ;
-        return IFJ_SUCCESS;
+        switch (c) {
+        case '=':
+          token->type = TOK_GEQ;
+          return IFJ_SUCCESS;
 
-      default:
-        ungetc(c, input);
-        token->type = TOK_GT;
-        return IFJ_SUCCESS;
-      }
+        default:
+          ungetc(c, input);
+          token->type = TOK_GT;
+          return IFJ_SUCCESS;
+        }
 
       case STATE_ASSIGN:
-      switch (c)
-      {
-      case '=':
-        token->type = TOK_EQ;
-        return IFJ_SUCCESS;
+        switch (c) {
+        case '=':
+          token->type = TOK_EQ;
+          return IFJ_SUCCESS;
 
-      default:
-        ungetc(c, input);
-        token->type = TOK_ASSIGN;
-        return IFJ_SUCCESS;
-      }
+        default:
+          ungetc(c, input);
+          token->type = TOK_ASSIGN;
+          return IFJ_SUCCESS;
+        }
 
       case STATE_NOT:
-      switch (c)
-      {
-      case '=':
-        token->type = TOK_NEQ;
-        return IFJ_SUCCESS;
+        switch (c) {
+        case '=':
+          token->type = TOK_NEQ;
+          return IFJ_SUCCESS;
 
-      default:
-        ungetc(c, input);
-        token->type = TOK_NOT;
-        return IFJ_SUCCESS;
-      }
+        default:
+          ungetc(c, input);
+          token->type = TOK_NOT;
+          return IFJ_SUCCESS;
+        }
 
       case STATE_PLUS:
-      switch (c)
-      {
-      case '+':
-        token->type = TOK_CONCAT;
-        return IFJ_SUCCESS; 
-      
+        switch (c) {
+        case '+':
+          token->type = TOK_CONCAT;
+          return IFJ_SUCCESS;
+
         default:
-        ungetc(c, input);
-        token->type = TOK_ADD;
-        return IFJ_SUCCESS;
-      }
+          ungetc(c, input);
+          token->type = TOK_ADD;
+          return IFJ_SUCCESS;
+        }
 
       case STATE_AMP:
-      switch (c)
-      {
-      case '&':
-        token->type = TOK_AND;
-        return IFJ_SUCCESS; 
+        switch (c) {
+        case '&':
+          token->type = TOK_AND;
+          return IFJ_SUCCESS;
 
         default:
-        return IFJ_ELEX;
-      }
+          return IFJ_ELEX;
+        }
 
       case STATE_PIPE:
-      switch (c)
-      {
-      case '|':
-        token->type = TOK_OR;
-        return IFJ_SUCCESS; 
+        switch (c) {
+        case '|':
+          token->type = TOK_OR;
+          return IFJ_SUCCESS;
 
         default:
-        return IFJ_ELEX;
-      }
+          return IFJ_ELEX;
+        }
 
-    default:
-      return IFJ_EINTERNAL;
+      case STATE_ID:
+        if (isalnum(c) || c == '_') {
+          IFJ_ERR err = dstring_append(&str, (char)c);
+          if (err != IFJ_SUCCESS) {
+            dstring_free(&str);
+            return err;
+          }
+        } else {
+          ungetc(c, input);
+
+          if (str.len == 1 && str.data[0] == '_') {
+            dstring_free(&str);
+            return IFJ_ELEX;
+          }
+        // Zkontrolovat jestli je to klíčové slovo
+          for (size_t i = 0; i < KEYWORD_COUNT; i++) {
+            if (keywords[i] != NULL && strcmp(str.data, keywords[i]) == 0) {
+              token->type = TOK_KEYWORD;
+              token->value.keyword = (keyword_t)i;
+              dstring_free(&str);
+              return IFJ_SUCCESS;
+            }
+          }
+        // Není to klíčové slovo, je to identifikátor
+          token->type = TOK_ID;
+          token->value.str_value = str.data;
+          return IFJ_SUCCESS;
+        }
+        break;
+
+      default:
+        return IFJ_EINTERNAL;
+      }
     }
   }
-}
