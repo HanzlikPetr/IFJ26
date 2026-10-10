@@ -746,10 +746,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_QUOTE:
       if (c == '"') {
-        token->type = TOK_STRING;
-        token->value.str_value = str.data;
-        return IFJ_SUCCESS;
-
+        state = STATE_EMPTY_STRING;
       } else {
         ungetc(c, input);
         state = STATE_STRING;
@@ -810,6 +807,19 @@ IFJ_ERR scanner_next_token(token_t *token) {
       state = STATE_STRING;
       break;
     }
+
+    case STATE_EMPTY_STRING:
+      // Začíná víceřádkový řetězec
+      if (c == '"') {
+        state = STATE_ML_STRING;
+      } else {
+        // Byl to prázdný řetězec, znak patří dalšímu tokenu
+        ungetc(c, input);
+        token->type = TOK_STRING;
+        token->value.str_value = str.data; // str je prázdný ""
+        return IFJ_SUCCESS;
+      }
+      break;
 
     default:
       return IFJ_EINTERNAL;
