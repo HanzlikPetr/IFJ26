@@ -99,6 +99,7 @@ static FILE *input = NULL;  // Vstupní soubor
 static int line = 1;        // Číslo aktuálního řádku
 static bool pending_dot = false; // Příští token je tečka (1.)
 static bool at_line_start = true; // Od posledního '\n' byly jen mezery
+static int paren_depth = 0; // Počet otevřených závorek ( a [.
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
@@ -109,6 +110,7 @@ IFJ_ERR scanner_init(FILE *file) {
   line = 1;
   pending_dot = false;
   at_line_start = true;
+  paren_depth = 0;
   return IFJ_SUCCESS;
 }
 
@@ -152,18 +154,22 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '(':
         token->type = TOK_LPAREN;
+        paren_depth++;
         return IFJ_SUCCESS;
 
       case ')':
         token->type = TOK_RPAREN;
+        paren_depth--;
         return IFJ_SUCCESS;
 
       case '[':
         token->type = TOK_LBRACKET;
+        paren_depth++;
         return IFJ_SUCCESS;
 
       case ']':
         token->type = TOK_RBRACKET;
+        paren_depth--;
         return IFJ_SUCCESS;
 
       case ',':
@@ -191,8 +197,11 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       case '\n':
-        token->type = TOK_EOL;
         line++;
+        if (paren_depth > 0) {
+          break;
+        }
+        token->type = TOK_EOL;
         at_line_start = true;
         return IFJ_SUCCESS;
 
