@@ -499,6 +499,15 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_INT_DOT;
       }
 
+      else if (c == 'e' || c == 'E') {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP;
+      }
+
       else {
         ungetc(c, input);
 
@@ -539,7 +548,16 @@ IFJ_ERR scanner_next_token(token_t *token) {
           return err;
         }
         state = STATE_INT_DOT;
-      } else {
+      } else if (c == 'e' || c == 'E') {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP;
+      }
+
+      else {
         ungetc(c, input);
         token->type = TOK_INT;
         token->value.int_value = 0;
@@ -575,7 +593,16 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
       } else if (c == '_') {
         state = STATE_DOUBLE_UNDERSCORE;
-      } else {
+      } else if (c == 'e' || c == 'E') {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP;
+      }
+
+      else {
         ungetc(c, input);
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
@@ -625,6 +652,76 @@ IFJ_ERR scanner_next_token(token_t *token) {
         ungetc(c, input);
         token->type = TOK_DOT;
         return IFJ_SUCCESS;
+      }
+      break;
+
+    case STATE_EXP:
+      if (c == '+' || c == '-') {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP_SIGN;
+      } else if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP_NUM;
+      } else {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_EXP_SIGN:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP_NUM;
+      } else {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_EXP_NUM:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+      } else if (c == '_') {
+        state = STATE_EXP_UNDERSCORE;
+      } else {
+        ungetc(c, input);
+        token->type = TOK_FLOAT;
+        token->value.double_value = strtod(str.data, NULL);
+        dstring_free(&str);
+        return IFJ_SUCCESS;
+      }
+      break;
+
+    case STATE_EXP_UNDERSCORE:
+      if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_EXP_NUM;
+
+      } else if (c == '_') {
+        // zůstáváme, další podtržítko
+      } else {
+        dstring_free(&str);
+        return IFJ_ELEX;
       }
       break;
 
