@@ -29,7 +29,7 @@ IFJ_ERR stack_init(stack_t *stack);
 
 /**
  * @brief Uvolnění zásobníku.
- * 
+ *
  * @param stack Zásobník, který se má uvolnit.
  */
 IFJ_ERR stack_dtor(stack_t *stack);
