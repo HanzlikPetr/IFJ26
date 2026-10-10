@@ -93,28 +93,62 @@ static const char *const keywords[] = {
     [KW_TYPE] = "type",
 };
 #define KEYWORD_COUNT (sizeof keywords / sizeof keywords[0])
+#define INDENT_STACK_INIT_CAP 16 // Počáteční kapacita zásobníku odsazení
 
 // Vnitřní stav scanneru
 static FILE *input = NULL;  // Vstupní soubor
 static int line = 1;        // Číslo aktuálního řádku
 static bool pending_dot = false; // Příští token je tečka (1.)
 static bool at_line_start = true; // Od posledního '\n' byly jen mezery
-static int paren_depth = 0; // Počet otevřených závorek ( a [.
+static int paren_depth = 0; // Počet otevřených závorek ( a [
+static int *indent_stack = NULL; // Zásobník úrovní odsazení, dno je 0.
+static int indent_top = 0;       // Index vrcholu zásobníku.
+static int indent_cap = 0;       // Kapacita zásobníku.
+static int line_indent = 0; // Počet mezer na začátku aktuálního řádku.
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
     LOG_ERR(IFJ_EINTERNAL, "Input file is NULL");
     return IFJ_EINTERNAL;
   }
+  indent_stack = malloc(INDENT_STACK_INIT_CAP * sizeof(int));
+  CHECK_MEM_ERR(indent_stack);
+  indent_cap = INDENT_STACK_INIT_CAP;
+  indent_top = 0;
+  indent_stack[0] = 0; // Začátek souboru má odsazení 0
+
   input = file;
   line = 1;
   pending_dot = false;
   at_line_start = true;
   paren_depth = 0;
+  line_indent = 0;
   return IFJ_SUCCESS;
 }
 
-void scanner_destroy(void) { input = NULL; }
+void scanner_destroy(void) {
+  free(indent_stack);
+  indent_stack = NULL;
+  indent_top = 0;
+  indent_cap = 0;
+  input = NULL;
+}
+
+/// @brief Vloží novou úroveň odsazení na zásobník.
+/// @param level Počet mezer nové úrovně.
+/// @return IFJ_SUCCESS, nebo IFJ_EINTERNAL při chybě alokace.
+static IFJ_ERR indent_push(int level) {
+  if (indent_top + 1 >= indent_cap) {
+    int *bigger = realloc(indent_stack, indent_cap * 2 * sizeof(int));
+    CHECK_MEM_ERR(bigger); // Při chybě zůstává indent_stack platný.
+    indent_stack = bigger;
+    indent_cap *= 2;
+  }
+
+  indent_top++;
+  indent_stack[indent_top] = level;
+  return IFJ_SUCCESS;
+}
 
 void token_free(token_t *token) {
   if (token == NULL) {
@@ -144,12 +178,32 @@ IFJ_ERR scanner_next_token(token_t *token) {
     switch (state) {
     case STATE_START:
       token->line = line;
-      // Cokoliv kromě bílých znaků znamená, že už nejsme na začátku řádku
+
       if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
+        if (at_line_start) {
+          at_line_start = false;
+          int current = indent_stack[indent_top];
+
+          if (line_indent > current) {
+            // Větší odsazení - začátek bloku
+            IFJ_ERR err = indent_push(line_indent);
+            if (err != IFJ_SUCCESS) {
+              return err;
+            }
+            ungetc(c, input);
+            token->type = TOK_INDENT;
+            return IFJ_SUCCESS;
+          }
+          // Menší odsazení
+        }
         at_line_start = false;
       }
+
       switch (c) {
       case ' ':
+        if (at_line_start) {
+          line_indent++;
+        }
         break;
 
       case '(':
@@ -198,6 +252,9 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '\n':
         line++;
+        if (paren_depth == 0) {
+          line_indent = 0;
+        }
         if (paren_depth > 0 || at_line_start) {
           break;
         }
