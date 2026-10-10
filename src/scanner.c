@@ -145,7 +145,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
     case STATE_START:
       token->line = line;
       // Cokoliv kromě bílých znaků znamená, že už nejsme na začátku řádku
-      if (c != ' ' && c != '\t' && c != '\n' && c != EOF) {
+      if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
         at_line_start = false;
       }
       switch (c) {
@@ -198,7 +198,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '\n':
         line++;
-        if (paren_depth > 0) {
+        if (paren_depth > 0 || at_line_start) {
           break;
         }
         token->type = TOK_EOL;
@@ -426,6 +426,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       default:
         ungetc(c, input);
+        at_line_start = false;
         token->type = TOK_DIV;
         return IFJ_SUCCESS;
       }
