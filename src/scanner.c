@@ -98,6 +98,7 @@ static const char *const keywords[] = {
 static FILE *input = NULL;  // Vstupní soubor
 static int line = 1;        // Číslo aktuálního řádku
 static bool pending_dot = false; // Příští token je tečka (1.)
+static bool at_line_start = true; // Od posledního '\n' byly jen mezery
 
 IFJ_ERR scanner_init(FILE *file) {
   if (file == NULL) {
@@ -107,6 +108,7 @@ IFJ_ERR scanner_init(FILE *file) {
   input = file;
   line = 1;
   pending_dot = false;
+  at_line_start = true;
   return IFJ_SUCCESS;
 }
 
@@ -140,6 +142,10 @@ IFJ_ERR scanner_next_token(token_t *token) {
     switch (state) {
     case STATE_START:
       token->line = line;
+      // Cokoliv kromě bílých znaků znamená, že už nejsme na začátku řádku
+      if (c != ' ' && c != '\t' && c != '\n' && c != EOF) {
+        at_line_start = false;
+      }
       switch (c) {
       case ' ':
         break;
@@ -187,6 +193,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
       case '\n':
         token->type = TOK_EOL;
         line++;
+        at_line_start = true;
         return IFJ_SUCCESS;
 
       case '<':
@@ -236,6 +243,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       case '@':
         state = STATE_AT;
+        break;
+
+      case '\t':
+        if (at_line_start) {
+          return IFJ_ELEX; // Tabulátor v odsazení
+        }
         break;
 
       default:
