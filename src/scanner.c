@@ -471,7 +471,13 @@ IFJ_ERR scanner_next_token(token_t *token) {
           dstring_free(&str);
           return err;
         }
-      } else {
+      }
+
+      else if (c == '_') {
+        state = STATE_INT_UNDERSCORE;
+      }
+
+      else {
         ungetc(c, input);
 
         token->type = TOK_INT;
@@ -483,8 +489,25 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
       break;
 
-    case STATE_ZERO:
+    case STATE_INT_UNDERSCORE:
       if (isdigit(c)) {
+        IFJ_ERR err = dstring_append(&str, (char)c);
+        if (err != IFJ_SUCCESS) {
+          dstring_free(&str);
+          return err;
+        }
+        state = STATE_INT;
+
+      } else if (c == '_') {
+        break;
+      } else {
+        dstring_free(&str);
+        return IFJ_ELEX;
+      }
+      break;
+
+    case STATE_ZERO:
+      if (isdigit(c) || c == '_') {
         dstring_free(&str);
         return IFJ_ELEX;
       }
