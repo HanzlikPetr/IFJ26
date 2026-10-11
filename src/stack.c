@@ -12,9 +12,6 @@
 #include "error.h"
 #include "stack.h"
 
-/**
- * @brief Reprezentace prvku zásobníku.
- */
 struct stack_elem {
   void *data;                    /**< Hodnota uložená v prvku. */
   struct stack_elem *next;      /**< Další prvek zásobníku. */
