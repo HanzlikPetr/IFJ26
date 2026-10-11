@@ -16,22 +16,10 @@
  * @brief Reprezentace prvku zásobníku.
  */
 struct stack_elem {
-  void *data;                    // Hodnota uložená v prvku.
-  struct stack_elem *next;      // Další prvek zásobníku.
+  void *data;                    /**< Hodnota uložená v prvku. */
+  struct stack_elem *next;      /**< Další prvek zásobníku. */
 };
 
-/**
- * @brief Implementace zásobníku.
- */
-struct stack {
-  stack_elem_t *top;              // Vrchol zásobníku.
-};
-
-/**
- * @brief Inicializace prázdného zásobníku.
- *
- * @param stack Zásobník, který se má inicializovat.
- */
 IFJ_ERR stack_init(stack_t *stack) {
   CHECK_ARG_NULL_RET(stack);
 
@@ -40,11 +28,6 @@ IFJ_ERR stack_init(stack_t *stack) {
   return IFJ_SUCCESS;
 }
 
-/**
- * @brief Uvolnění zásobníku.
- *
- * @param stack Zásobník, který se má uvolnit.
- */
 IFJ_ERR stack_dtor(stack_t *stack) {
   CHECK_ARG_NULL_RET(stack);
 
@@ -53,18 +36,13 @@ IFJ_ERR stack_dtor(stack_t *stack) {
   while (stack->top) {
     top = stack->top;
     stack->top = top->next;
+    // free(top->data);
     free(top);
   }
 
   return IFJ_SUCCESS;
 }
 
-/**
- * @brief Kontrola prázdnosti stromu.
- *
- * @param stack Zásobník, který se kontroluje.
- * @param is_empty Proměnná, která zachycuje výsledek.
- */
 IFJ_ERR stack_is_empty(stack_t *stack, bool *is_empty) {
   CHECK_ARGS_NULL_RET(stack, is_empty);
   *is_empty = (stack->top == NULL);
@@ -72,12 +50,6 @@ IFJ_ERR stack_is_empty(stack_t *stack, bool *is_empty) {
   return IFJ_SUCCESS;
 }
 
-/**
- * @brief Vložení prvku na vrchol zásobníku.
- *
- * @param stack Zásobník, na který se vkládá.
- * @param data Hodnota, která se zapisuje na zásobník.
- */
 IFJ_ERR stack_push(stack_t *stack, void *data) {
   CHECK_ARGS_NULL_RET(stack, data);
 
@@ -91,12 +63,6 @@ IFJ_ERR stack_push(stack_t *stack, void *data) {
   return IFJ_SUCCESS;
 }
 
-/**
- * @brief Ukázání vrcholu zásobníku.
- *
- * @param stack Zásobník, jehož vrchol se ukazuje.
- * @param data_out Hodnota, kam se vrchol zapisuje.
- */
 IFJ_ERR stack_top(stack_t *stack, void **data_out) {
   CHECK_ARGS_NULL_RET(stack, data_out);
 
@@ -104,15 +70,8 @@ IFJ_ERR stack_top(stack_t *stack, void **data_out) {
   return IFJ_SUCCESS;
 }
 
-/**
- * @brief Odstranění a vrácení vrcholu zásobníku.
- *
- * @param stack Zásobník, ze kterého se odstraňuje.
- * @param data_out Hodnota, která zachycuje odstraňovaný vrchol.
- */
 IFJ_ERR stack_pop(stack_t *stack, void **data_out) {
-  IFJ_ERR err = stack_top(stack, data_out);
-  CHECK_ERR_RET(err);
+  CHECK_ERR_RET(stack_top(stack, data_out));
 
   stack_elem_t *temp = stack->top;
   stack->top = temp->next;
