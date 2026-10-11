@@ -52,7 +52,8 @@ IFJ_ERR stack_dtor(stack_t *stack);
  *
  * @param stack Zásobník, který se má uvolnit.
  * @param data_dtor Funkce, která uvolňuje atribut data.
- * @return IFJ_EINTERNAL při poslání ukazatele NULL.
+ * @return IFJ_EINTERNAL při poslání ukazatele NULL,
+ * nebo při selhání uvolňování atributu data.
  * @return IFJ_SUCCESS při úspěšném uvolnění zásobníku.
  */
 IFJ_ERR stack_deep_dtor(stack_t *stack, callback_t data_dtor);
