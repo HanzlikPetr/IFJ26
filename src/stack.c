@@ -36,7 +36,7 @@ IFJ_ERR stack_dtor(stack_t *stack) {
   while (stack->top) {
     top = stack->top;
     stack->top = top->next;
-    // free(top->data);
+    free(top->data);
     free(top);
   }
 
