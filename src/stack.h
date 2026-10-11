@@ -30,13 +30,32 @@ typedef struct stack {
 IFJ_ERR stack_init(stack_t *stack);
 
 /**
+ * @brief Pomocný datový typ callback funkce.
+ */
+typedef IFJ_ERR (*callback_t)(void *);
+
+/**
  * @brief Uvolnění zásobníku.
+ *
+ * Uživatel ručí za uvolnění atributu data.
  *
  * @param stack Zásobník, který se má uvolnit.
  * @return IFJ_EINTERNAL při poslání ukazatele NULL.
  * @return IFJ_SUCCESS při úspěšném uvolnění zásobníku.
  */
 IFJ_ERR stack_dtor(stack_t *stack);
+
+/**
+ * @brief Hluboké uvolnění zásobníku.
+ *
+ * Funkce uvolní i atribut data.
+ *
+ * @param stack Zásobník, který se má uvolnit.
+ * @param data_dtor Funkce, která uvolňuje atribut data.
+ * @return IFJ_EINTERNAL při poslání ukazatele NULL.
+ * @return IFJ_SUCCESS při úspěšném uvolnění zásobníku.
+ */
+IFJ_ERR stack_deep_dtor(stack_t *stack, callback_t data_dtor);
 
 /**
  * @brief Kontrola prázdnosti stromu.

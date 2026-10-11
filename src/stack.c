@@ -33,7 +33,21 @@ IFJ_ERR stack_dtor(stack_t *stack) {
   while (stack->top) {
     top = stack->top;
     stack->top = top->next;
-    free(top->data);
+    free(top);
+  }
+
+  return IFJ_SUCCESS;
+}
+
+IFJ_ERR stack_deep_dtor(stack_t *stack, callback_t data_dtor) {
+  CHECK_ARGS_NULL_RET(stack, data_dtor);
+
+  stack_elem_t *top;
+
+  while (stack->top) {
+    top = stack->top;
+    stack->top = top->next;
+    CHECK_ERR_RET(data_dtor(top->data));
     free(top);
   }
 
