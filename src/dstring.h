@@ -12,26 +12,34 @@
 
 #include "error.h"
 
-/// @brief Dynamický řetězec
+/**
+ * @brief Dynamický řetězec
+ */
 typedef struct {
   char *data;
   size_t len;
   size_t cap;
 } dstring_t;
 
-/// @brief Inicializuje prazdný řetězec
-/// @param str Řetězec k inicializaci
-/// @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL chyba při alokaci
+/**
+ * @brief Inicializuje prazdný řetězec
+ * @param str Řetězec k inicializaci
+ * @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL chyba při alokaci
+ */
 IFJ_ERR dstring_init(dstring_t *str);
 
-/// @brief Přidá znak na konec řetězce
-/// @param str Řetězec
-/// @param c Znak k přidání
-/// @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL chyba při alokaci
+/**
+ * @brief Přidá znak na konec řetězce
+ * @param str Řetězec
+ * @param c Znak k přidání
+ * @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL chyba při alokaci
+ */
 IFJ_ERR dstring_append(dstring_t *str, char c);
 
-/// @brief Uvolní paměť řetězce
-/// @param str Řetězec
+/**
+ * @brief Uvolní paměť řetězce
+ * @param str Řetězec
+ */
 void dstring_free(dstring_t *str);
 
 #endif

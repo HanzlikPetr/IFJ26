@@ -15,7 +15,9 @@
 #include "error.h"
 #include "scanner.h"
 
-/// @brief Stavy konečného automatu
+/**
+ * @brief Stavy konečného automatu
+ */
 typedef enum {
   STATE_START,
 
@@ -65,7 +67,9 @@ typedef enum {
   STATE_AT_ID, // @xxx (po dočtení se porovná s "main")
 } scanner_state_t;
 
-/// @brief Tabulka klíčových slov, index odpovídá hodnotě keyword_t.
+/**
+ * @brief Tabulka klíčových slov, index odpovídá hodnotě keyword_t.
+ */
 static const char *const keywords[] = {
     [KW_DEF] = "def",
     [KW_DO] = "do",
@@ -97,25 +101,25 @@ static const char *const keywords[] = {
 
 // Vnitřní stav scanneru
 static FILE *input = NULL;
-/// Číslo aktuálního řádku.
+/** Číslo aktuálního řádku. */
 static int line = 1;
-/// Příští token je tečka (po "1.").
+/** Příští token je tečka (po "1."). */
 static bool pending_dot = false;
-/// Od posledního '\n' byly jen mezery.
+/** Od posledního '\n' byly jen mezery. */
 static bool at_line_start = true;
-/// Počet otevřených závorek ( a [.
+/** Počet otevřených závorek ( a [. */
 static int paren_depth = 0;
-/// Zásobník úrovní odsazení, dno je 0.
+/** Zásobník úrovní odsazení, dno je 0. */
 static int *indent_stack = NULL;
-/// Index vrcholu zásobníku odsazení.
+/** Index vrcholu zásobníku odsazení. */
 static int indent_top = 0;
-/// Kapacita zásobníku odsazení.
+/** Kapacita zásobníku odsazení. */
 static int indent_cap = 0;
-/// Počet mezer na začátku aktuálního řádku.
+/** Počet mezer na začátku aktuálního řádku. */
 static int line_indent = 0;
-/// Kolik DEDENTů ještě zbývá vrátit.
+/** Kolik DEDENTů ještě zbývá vrátit. */
 static int pending_dedents = 0;
-/// Po víceřádkovém komentáři smí být jen konec řádku.
+/** Po víceřádkovém komentáři smí být jen konec řádku. */
 static bool expect_line_end = false;
 
 IFJ_ERR scanner_init(FILE *file) {
@@ -148,9 +152,11 @@ void scanner_destroy(void) {
   input = NULL;
 }
 
-/// @brief Vloží novou úroveň odsazení na zásobník.
-/// @param level Počet mezer nové úrovně.
-/// @return IFJ_SUCCESS, nebo IFJ_EINTERNAL při chybě alokace.
+/**
+ * @brief Vloží novou úroveň odsazení na zásobník.
+ * @param level Počet mezer nové úrovně.
+ * @return IFJ_SUCCESS, nebo IFJ_EINTERNAL při chybě alokace.
+ */
 static IFJ_ERR indent_push(int level) {
   if (indent_top + 1 >= indent_cap) {
     int *bigger = realloc(indent_stack, indent_cap * 2 * sizeof(int));

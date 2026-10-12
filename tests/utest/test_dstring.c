@@ -1,7 +1,9 @@
-/// @file test_dstring.c
-/// @brief Projekt IFJ26 - jednotkové testy dynamického řetězce
-///
-/// @author xjurokv00 Vojtěch Jurok
+/**
+ * @file test_dstring.c
+ * @brief Projekt IFJ26 - jednotkové testy dynamického řetězce
+ *
+ * @author xjurokv00 Vojtěch Jurok
+ */
 
 #include <string.h>
 
@@ -9,7 +11,9 @@
 
 #include "dstring.h"
 
-/// @brief Inicializace vytvoří prázdný, ukončený řetězec.
+/**
+ * @brief Inicializace vytvoří prázdný, ukončený řetězec.
+ */
 static void test_init_empty(void **state) {
   (void)state;
   dstring_t s;
@@ -23,7 +27,9 @@ static void test_init_empty(void **state) {
   dstring_free(&s);
 }
 
-/// @brief Přidání jednoho znaku.
+/**
+ * @brief Přidání jednoho znaku.
+ */
 static void test_append_one(void **state) {
   (void)state;
   dstring_t s;
@@ -36,7 +42,9 @@ static void test_append_one(void **state) {
   dstring_free(&s);
 }
 
-/// @brief Několik znaků za sebou zachová pořadí.
+/**
+ * @brief Několik znaků za sebou zachová pořadí.
+ */
 static void test_append_several(void **state) {
   (void)state;
   dstring_t s;
@@ -52,7 +60,9 @@ static void test_append_several(void **state) {
   dstring_free(&s);
 }
 
-/// @brief Přidání přes hranici kapacity pole zvětší a obsah zachová.
+/**
+ * @brief Přidání přes hranici kapacity pole zvětší a obsah zachová.
+ */
 static void test_append_grows(void **state) {
   (void)state;
   dstring_t s;
@@ -76,7 +86,9 @@ static void test_append_grows(void **state) {
   dstring_free(&s);
 }
 
-/// @brief Hraniční případ: přesně tolik znaků, kolik se vejde bez zvětšení.
+/**
+ * @brief Hraniční případ: přesně tolik znaků, kolik se vejde bez zvětšení.
+ */
 static void test_append_exact_boundary(void **state) {
   (void)state;
   dstring_t s;
@@ -99,7 +111,9 @@ static void test_append_exact_boundary(void **state) {
   dstring_free(&s);
 }
 
-/// @brief Řetězec smí obsahovat speciální znaky (nový řádek, tabulátor).
+/**
+ * @brief Řetězec smí obsahovat speciální znaky (nový řádek, tabulátor).
+ */
 static void test_append_special_chars(void **state) {
   (void)state;
   dstring_t s;
@@ -113,7 +127,9 @@ static void test_append_special_chars(void **state) {
   dstring_free(&s);
 }
 
-/// @brief Uvolnění vynuluje strukturu a opakované uvolnění je bezpečné.
+/**
+ * @brief Uvolnění vynuluje strukturu a opakované uvolnění je bezpečné.
+ */
 static void test_free_resets(void **state) {
   (void)state;
   dstring_t s;
@@ -129,7 +145,9 @@ static void test_free_resets(void **state) {
   assert_null(s.data);
 }
 
-/// @brief Po uvolnění lze strukturu znovu inicializovat.
+/**
+ * @brief Po uvolnění lze strukturu znovu inicializovat.
+ */
 static void test_reinit_after_free(void **state) {
   (void)state;
   dstring_t s;
