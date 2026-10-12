@@ -12,7 +12,9 @@
 
 #include "error.h"
 
-/// @brief Klíčová slova jazyka IFJ26
+/**
+ * @brief Klíčová slova jazyka IFJ26
+ */
 typedef enum {
   KW_DEF,
   KW_DO,
@@ -40,7 +42,9 @@ typedef enum {
   KW_TYPE,
 } keyword_t;
 
-/// @brief Typy tokenů vracených scannerem
+/**
+ * @brief Typy tokenů vracených scannerem
+ */
 typedef enum {
   TOK_EOF,
   TOK_EOL,
@@ -84,7 +88,9 @@ typedef enum {
   TOK_DEDENT, // konec odsazení
 } token_type_t;
 
-/// @brief Hodnota tokenu
+/**
+ * @brief Hodnota tokenu
+ */
 typedef union {
   long long int_value;
   double double_value;
@@ -92,28 +98,38 @@ typedef union {
   keyword_t keyword;
 } token_value_t;
 
-/// @brief Token predavany parseru
+/**
+ * @brief Token predavany parseru
+ */
 typedef struct {
   token_type_t type;
   token_value_t value;
   int line;
 } token_t;
 
-/// @brief Inicializace scanneru
-/// @param file Vstupní soubor
-/// @return IFJ_ERR úspěch, nebo chyba při alokaci
+/**
+ * @brief Inicializace scanneru
+ * @param file Vstupní soubor
+ * @return IFJ_ERR úspěch, nebo chyba při alokaci
+ */
 IFJ_ERR scanner_init(FILE *file);
 
-/// @brief Získani následujícího tokenu
-/// @param token Výstupní token
-/// @return IFJ_ERR úspěch, lexikální chyba, nebo interní chyba
+/**
+ * @brief Získani následujícího tokenu
+ * @param token Výstupní token
+ * @return IFJ_ERR úspěch, lexikální chyba, nebo interní chyba
+ */
 IFJ_ERR scanner_next_token(token_t *token);
 
-/// @brief Uvolnění paměti tokenu
-/// @param token Token k uvolnění
+/**
+ * @brief Uvolnění paměti tokenu
+ * @param token Token k uvolnění
+ */
 void token_free(token_t *token);
 
-/// @brief Uvolnění vnitřní struktury scanneru
+/**
+ * @brief Uvolnění vnitřní struktury scanneru
+ */
 void scanner_destroy(void);
 
 #endif
