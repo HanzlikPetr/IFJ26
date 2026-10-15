@@ -13,9 +13,6 @@
 #include "error.h"
 #include "symtable.h"
 
-/**
- * @brief Struktura pro uzel AVL stromu.
- */
 struct avl_node {
   char *key;              /**< Klíč uzlu */
   symtable_data_t data;   /**< Data uzlu */
