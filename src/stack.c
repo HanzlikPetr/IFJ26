@@ -5,11 +5,9 @@
  * @author xberanm00 Marek Beran
  */
 
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "error.h"
 #include "stack.h"
 
 struct stack_elem {
