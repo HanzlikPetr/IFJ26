@@ -123,8 +123,9 @@ IFJ_ERR scanner_next_token(token_t *token);
 /**
  * @brief Uvolnění paměti tokenu
  * @param token Token k uvolnění
+ * @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL pokud je token NULL
  */
-void token_free(token_t *token);
+IFJ_ERR token_free(token_t *token);
 
 /**
  * @brief Uvolnění vnitřní struktury scanneru
