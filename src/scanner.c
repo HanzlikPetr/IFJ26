@@ -176,7 +176,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
   }
 
   scanner_state_t state = STATE_START;
-  dstring_t str;
+  IFJ_ERR err = IFJ_SUCCESS;
+  dstring_t str = {NULL, 0, 0};
   int comment_depth = 0;
   bool comment_newline = false; // Obsahuje komentář '\n'
 
@@ -351,14 +352,11 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_DOT;
         break;
 
-      case '"': {
-        IFJ_ERR err = dstring_init(&str);
-        if (err != IFJ_SUCCESS) {
-          return err;
-        }
+      case '"':
+        err = dstring_init(&str);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_QUOTE;
         break;
-      }
 
       case '@':
         state = STATE_AT;
@@ -373,30 +371,19 @@ IFJ_ERR scanner_next_token(token_t *token) {
       default:
         // Písmena
         if (isalpha(c) || c == '_') {
-          IFJ_ERR err = dstring_init(&str);
-          if (err != IFJ_SUCCESS) {
-            return err;
-          }
-
+          err = dstring_init(&str);
+          CHECK_ERR_GOTO(err, cleanup);
           err = dstring_append(&str, (char)c);
-          if (err != IFJ_SUCCESS) {
-            dstring_free(&str);
-            return err;
-          }
+          CHECK_ERR_GOTO(err, cleanup);
           state = STATE_ID;
           break;
         }
         // Čísla
         if (isdigit(c)) {
-          IFJ_ERR err = dstring_init(&str);
-          if (err != IFJ_SUCCESS) {
-            return err;
-          }
+          err = dstring_init(&str);
+          CHECK_ERR_GOTO(err, cleanup);
           err = dstring_append(&str, (char)c);
-          if (err != IFJ_SUCCESS) {
-            dstring_free(&str);
-            return err;
-          }
+          CHECK_ERR_GOTO(err, cleanup);
           if (c == '0') {
             state = STATE_ZERO;
           } else {
@@ -495,17 +482,14 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_ID:
       if (isalnum(c) || c == '_') {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
       } else {
         ungetc(c, stdin);
 
         if (str.len == 1 && str.data[0] == '_') {
-          dstring_free(&str);
-          return IFJ_ELEX;
+          err = IFJ_ELEX;
+          goto cleanup;
         }
         // Zkontrolovat jestli je to klíčové slovo
         for (size_t i = 0; i < KEYWORD_COUNT; i++) {
@@ -639,11 +623,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_INT:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
       }
 
       else if (c == '_') {
@@ -651,20 +632,14 @@ IFJ_ERR scanner_next_token(token_t *token) {
       }
 
       else if (c == '.') {
-        IFJ_ERR err = dstring_append(&str, '.');
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_INT_DOT;
       }
 
       else if (c == 'e' || c == 'E') {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP;
       }
 
@@ -682,38 +657,29 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_INT_UNDERSCORE:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_INT;
 
       } else if (c == '_') {
         break;
       } else {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       }
       break;
 
     case STATE_ZERO:
       if (isdigit(c) || c == '_') {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       } else if (c == '.') {
-        IFJ_ERR err = dstring_append(&str, '.');
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, '.');
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_INT_DOT;
       } else if (c == 'e' || c == 'E') {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP;
       }
 
@@ -728,11 +694,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_INT_DOT:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_DOUBLE;
       } else {
         ungetc(c, stdin);
@@ -746,19 +709,13 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_DOUBLE:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
       } else if (c == '_') {
         state = STATE_DOUBLE_UNDERSCORE;
       } else if (c == 'e' || c == 'E') {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP;
       } else if (c == 'd' || c == 'D') {
         token->type = TOK_FLOAT;
@@ -778,38 +735,26 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_DOUBLE_UNDERSCORE:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_DOUBLE;
 
       } else if (c == '_') {
         // zůstáváme, další podtržítko
       } else {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       }
       break;
 
     case STATE_DOT:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_init(&str);
-        if (err != IFJ_SUCCESS) {
-          return err;
-        }
+        err = dstring_init(&str);
+        CHECK_ERR_GOTO(err, cleanup);
         err = dstring_append(&str, '.');
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
-
+        CHECK_ERR_GOTO(err, cleanup);
         err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        CHECK_ERR_GOTO(err, cleanup);
 
         state = STATE_DOUBLE;
 
@@ -822,46 +767,34 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_EXP:
       if (c == '+' || c == '-') {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP_SIGN;
       } else if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP_NUM;
       } else {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       }
       break;
 
     case STATE_EXP_SIGN:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP_NUM;
       } else {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       }
       break;
 
     case STATE_EXP_NUM:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
       } else if (c == '_') {
         state = STATE_EXP_UNDERSCORE;
       } else if (c == 'd' || c == 'D') {
@@ -880,18 +813,14 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_EXP_UNDERSCORE:
       if (isdigit(c)) {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP_NUM;
-
       } else if (c == '_') {
         // zůstáváme, další podtržítko
       } else {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       }
       break;
 
@@ -911,18 +840,15 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       } else if (c == '\n' || c == EOF) {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
 
       } else if (c == '\\') {
         state = STATE_STRING_ESCAPE;
 
       } else {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
       }
       break;
 
@@ -946,15 +872,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
       default:
         // neznámá escape sekvence
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
       }
 
-      IFJ_ERR err = dstring_append(&str, decoded);
-      if (err != IFJ_SUCCESS) {
-        dstring_free(&str);
-        return err;
-      }
+      err = dstring_append(&str, decoded);
+      CHECK_ERR_GOTO(err, cleanup);
       state = STATE_STRING;
       break;
     }
@@ -977,15 +900,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_ML_STRING_Q1;
 
       } else if (c == EOF) {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
 
       } else {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
         if (c == '\n') {
           line++;
         }
@@ -996,15 +916,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
       if (c == '"') {
         state = STATE_ML_STRING_Q2;
       } else if (c == EOF) {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
 
       } else {
-        IFJ_ERR err = dstring_append(&str, '"');
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, '"');
+        CHECK_ERR_GOTO(err, cleanup);
         ungetc(c, stdin);
         state = STATE_ML_STRING;
       }
@@ -1017,21 +934,14 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       } else if (c == EOF) {
-        dstring_free(&str);
-        return IFJ_ELEX;
+        err = IFJ_ELEX;
+        goto cleanup;
 
       } else {
-        IFJ_ERR err = dstring_append(&str, '"');
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
-
         err = dstring_append(&str, '"');
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        CHECK_ERR_GOTO(err, cleanup);
+        err = dstring_append(&str, '"');
+        CHECK_ERR_GOTO(err, cleanup);
         ungetc(c, stdin);
         state = STATE_ML_STRING;
       }
@@ -1040,15 +950,10 @@ IFJ_ERR scanner_next_token(token_t *token) {
     case STATE_AT:
       if (isalpha(c)) {
         // Za @ začíná jméno anotace.
-        IFJ_ERR err = dstring_init(&str);
-        if (err != IFJ_SUCCESS) {
-          return err;
-        }
+        err = dstring_init(&str);
+        CHECK_ERR_GOTO(err, cleanup);
         err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        CHECK_ERR_GOTO(err, cleanup);
         state = STATE_AT_ID;
       } else {
         return IFJ_ELEX;
@@ -1057,11 +962,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_AT_ID:
       if (isalnum(c) || c == '_') {
-        IFJ_ERR err = dstring_append(&str, (char)c);
-        if (err != IFJ_SUCCESS) {
-          dstring_free(&str);
-          return err;
-        }
+        err = dstring_append(&str, (char)c);
+        CHECK_ERR_GOTO(err, cleanup);
       } else {
         // Jméno skončilo, jediná povolená anotace je @main.
         ungetc(c, stdin);
@@ -1080,4 +982,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
       return IFJ_EINTERNAL;
     }
   }
+  // Společný úklid při chybě: uvolní rozpracovaný řetězec
+cleanup:
+  dstring_free(&str);
+  return err;
 }
