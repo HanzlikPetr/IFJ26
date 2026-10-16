@@ -12,6 +12,8 @@
 #define DSTRING_INITIAL_CAP 16 // Počáteční velikost pole
 
 IFJ_ERR dstring_init(dstring_t *str) {
+  CHECK_ARGS_NULL_RET(str);
+
   str->data = malloc(DSTRING_INITIAL_CAP * sizeof(char));
   CHECK_MEM_ERR(str->data);
 
