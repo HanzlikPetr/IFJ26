@@ -106,6 +106,15 @@ typedef enum {
     }                                                                          \
   } while (0)
 
+/*
+ * Tests created from the following prompt (model: GLM-5.3 via opencode):
+ * Makro CHECK_ARGS_NULL_RET, bylo vyvtvořeno za pomoci modelu Gemini 3.1 Pro,
+ * který vygeneroval kod na základě následujícího promptu: Prompt: "Write a C
+ * variadic macro called CHECK_ARGS_NULL_RET that accepts 1 to 10 arguments and
+ * checks them for NULL. Instead of hardcoding one giant if statement for every
+ * possible argument count." Makro bylo nasledně upraveno a doplněno o logování
+ * chybového kódu a zprávy za použití CHECK_ARG_NULL_RET.
+ */
 #define EXPAND(x) x
 #define GLUE(a, b) a##b
 
