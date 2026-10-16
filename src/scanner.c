@@ -150,14 +150,14 @@ static IFJ_ERR indent_current(int *level) {
   return IFJ_SUCCESS;
 }
 
-void token_free(token_t *token) {
-  if (token == NULL) {
-    return;
-  }
+IFJ_ERR token_free(token_t *token) {
+  CHECK_ARGS_NULL_RET(token);
+
   if (token->type == TOK_STRING || token->type == TOK_ID) {
     free(token->value.str_value);
     token->value.str_value = NULL;
   }
+  return IFJ_SUCCESS;
 }
 
 IFJ_ERR scanner_next_token(token_t *token) {

@@ -154,9 +154,9 @@ static void test_only_whitespace(void **state) {
  */
 static void test_token_free_safe(void **state) {
   (void)state;
-  token_free(NULL);
+  assert_int_equal(token_free(NULL), IFJ_EINTERNAL);
   token_t tok = {.type = TOK_ADD};
-  token_free(&tok);
+  assert_int_equal(token_free(&tok), IFJ_SUCCESS);
 }
 
 /**
