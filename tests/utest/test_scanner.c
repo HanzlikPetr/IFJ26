@@ -29,25 +29,32 @@ static FILE *open_src(const char *src) {
   return fmemopen((void *)src, strlen(src), "r");
 }
 
+/** Původní stdin, vrací se po každém testu. */
+static FILE *original_stdin = NULL;
+
 /**
  * @brief Inicializuje scanner nad zadaným textem.
+ *
  * @param src Zdrojový text.
  * @return Otevřený proud (uzavírá se funkcí close_scanner).
  */
 static FILE *start_scanner(const char *src) {
   FILE *f = open_src(src);
   assert_non_null(f);
-  assert_int_equal(scanner_init(f), IFJ_SUCCESS);
+  original_stdin = stdin;
+  stdin = f;
+  assert_int_equal(scanner_init(), IFJ_SUCCESS);
   return f;
 }
 
 /**
- * @brief Uvolní scanner a zavře vstup.
+ * @brief Uvolní scanner, zavře vstup a vrátí původní stdin.
  * @param f Proud vrácený ze start_scanner.
  */
 static void close_scanner(FILE *f) {
   scanner_destroy();
   fclose(f);
+  stdin = original_stdin;
 }
 
 /**
@@ -119,14 +126,6 @@ static FILE *first_token(const char *src, token_t *tok) {
 // ---------------------------------------------------------------------------
 // Inicializace a základní chování
 // ---------------------------------------------------------------------------
-
-/**
- * @brief scanner_init s NULL vrací interní chybu.
- */
-static void test_init_null(void **state) {
-  (void)state;
-  assert_int_equal(scanner_init(NULL), IFJ_EINTERNAL);
-}
 
 /**
  * @brief Prázdný vstup dá rovnou EOF, opakovaně.
@@ -990,7 +989,6 @@ static void test_reinit(void **state) {
 int main(void) {
   const struct CMUnitTest tests[] = {
       // Inicializace
-      cmocka_unit_test(test_init_null),
       cmocka_unit_test(test_empty_input),
       cmocka_unit_test(test_only_whitespace),
       cmocka_unit_test(test_token_free_safe),

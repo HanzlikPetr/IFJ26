@@ -99,8 +99,6 @@ static const char *const keywords[] = {
 #define KEYWORD_COUNT (sizeof keywords / sizeof keywords[0])
 #define INDENT_STACK_INIT_CAP 16 // Počáteční kapacita zásobníku odsazení
 
-// Vnitřní stav scanneru
-static FILE *input = NULL;
 /** Číslo aktuálního řádku. */
 static int line = 1;
 /** Příští token je tečka (po "1."). */
@@ -122,18 +120,13 @@ static int pending_dedents = 0;
 /** Po víceřádkovém komentáři smí být jen konec řádku. */
 static bool expect_line_end = false;
 
-IFJ_ERR scanner_init(FILE *file) {
-  if (file == NULL) {
-    LOG_ERR(IFJ_EINTERNAL, "Input file is NULL");
-    return IFJ_EINTERNAL;
-  }
+IFJ_ERR scanner_init(void) {
   indent_stack = malloc(INDENT_STACK_INIT_CAP * sizeof(int));
   CHECK_MEM_ERR(indent_stack);
   indent_cap = INDENT_STACK_INIT_CAP;
   indent_top = 0;
   indent_stack[0] = 0; // Začátek souboru má odsazení 0
 
-  input = file;
   line = 1;
   pending_dot = false;
   at_line_start = true;
@@ -149,7 +142,6 @@ void scanner_destroy(void) {
   indent_stack = NULL;
   indent_top = 0;
   indent_cap = 0;
-  input = NULL;
 }
 
 /**
@@ -201,7 +193,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
   bool comment_newline = false; // Obsahuje komentář '\n'
 
   while (true) {
-    int c = fgetc(input);
+    int c = fgetc(stdin);
 
     switch (state) {
     case STATE_START:
@@ -221,7 +213,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
             if (err != IFJ_SUCCESS) {
               return err;
             }
-            ungetc(c, input);
+            ungetc(c, stdin);
             token->type = TOK_INDENT;
             return IFJ_SUCCESS;
           }
@@ -235,7 +227,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
             if (indent_stack[indent_top] != line_indent) {
               return IFJ_ELEX; // Odsazení neodpovídá žádné úrovni
             }
-            ungetc(c, input);
+            ungetc(c, stdin);
             pending_dedents = count - 1; // Jeden vracíme hned.
             token->type = TOK_DEDENT;
             return IFJ_SUCCESS;
@@ -430,7 +422,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       default:
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_LT;
         return IFJ_SUCCESS;
       }
@@ -442,7 +434,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       default:
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_GT;
         return IFJ_SUCCESS;
       }
@@ -454,7 +446,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       default:
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_ASSIGN;
         return IFJ_SUCCESS;
       }
@@ -466,7 +458,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       default:
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_NOT;
         return IFJ_SUCCESS;
       }
@@ -478,7 +470,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       default:
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_ADD;
         return IFJ_SUCCESS;
       }
@@ -511,7 +503,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
           return err;
         }
       } else {
-        ungetc(c, input);
+        ungetc(c, stdin);
 
         if (str.len == 1 && str.data[0] == '_') {
           dstring_free(&str);
@@ -546,7 +538,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       default:
-        ungetc(c, input);
+        ungetc(c, stdin);
         at_line_start = false;
         token->type = TOK_DIV;
         return IFJ_SUCCESS;
@@ -555,7 +547,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     case STATE_LINE_COMMENT:
       if (c == '\n' || c == EOF) {
-        ungetc(c, input);
+        ungetc(c, stdin);
         state = STATE_START;
       }
       break;
@@ -679,7 +671,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
       }
 
       else {
-        ungetc(c, input);
+        ungetc(c, stdin);
 
         token->type = TOK_INT;
         token->value.int_value = strtoll(str.data, NULL, 10);
@@ -728,7 +720,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
       }
 
       else {
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_INT;
         token->value.int_value = 0;
         dstring_free(&str);
@@ -745,7 +737,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
         state = STATE_DOUBLE;
       } else {
-        ungetc(c, input);
+        ungetc(c, stdin);
         pending_dot = true;
         token->type = TOK_INT;
         token->value.int_value = strtoll(str.data, NULL, 10);
@@ -778,7 +770,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
       }
 
       else {
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
         dstring_free(&str);
@@ -824,7 +816,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_DOUBLE;
 
       } else {
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_DOT;
         return IFJ_SUCCESS;
       }
@@ -880,7 +872,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         dstring_free(&str);
         return IFJ_SUCCESS;
       } else {
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_FLOAT;
         token->value.double_value = strtod(str.data, NULL);
         dstring_free(&str);
@@ -909,7 +901,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
       if (c == '"') {
         state = STATE_EMPTY_STRING;
       } else {
-        ungetc(c, input);
+        ungetc(c, stdin);
         state = STATE_STRING;
       }
       break;
@@ -975,7 +967,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_ML_STRING;
       } else {
         // Byl to prázdný řetězec, znak patří dalšímu tokenu
-        ungetc(c, input);
+        ungetc(c, stdin);
         token->type = TOK_STRING;
         token->value.str_value = str.data; // str je prázdný ""
         return IFJ_SUCCESS;
@@ -1015,7 +1007,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
           dstring_free(&str);
           return err;
         }
-        ungetc(c, input);
+        ungetc(c, stdin);
         state = STATE_ML_STRING;
       }
       break;
@@ -1042,7 +1034,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
           dstring_free(&str);
           return err;
         }
-        ungetc(c, input);
+        ungetc(c, stdin);
         state = STATE_ML_STRING;
       }
       break;
@@ -1074,7 +1066,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
       } else {
         // Jméno skončilo, jediná povolená anotace je @main.
-        ungetc(c, input);
+        ungetc(c, stdin);
         bool is_main = strcmp(str.data, "main") == 0;
         dstring_free(&str);
 

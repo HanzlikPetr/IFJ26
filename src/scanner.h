@@ -109,10 +109,9 @@ typedef struct {
 
 /**
  * @brief Inicializace scanneru
- * @param file Vstupní soubor
  * @return IFJ_ERR úspěch, nebo chyba při alokaci
  */
-IFJ_ERR scanner_init(FILE *file);
+IFJ_ERR scanner_init(void);
 
 /**
  * @brief Získani následujícího tokenu
