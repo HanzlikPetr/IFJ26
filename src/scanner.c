@@ -7,6 +7,7 @@
 
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 #include "dstring.h"
 #include "error.h"
 #include "scanner.h"
+#include "stack.h"
 
 /**
  * @brief Stavy konečného automatu
@@ -97,7 +99,6 @@ static const char *const keywords[] = {
     [KW_TYPE] = "type",
 };
 #define KEYWORD_COUNT (sizeof keywords / sizeof keywords[0])
-#define INDENT_STACK_INIT_CAP 16 // Počáteční kapacita zásobníku odsazení
 
 /** Číslo aktuálního řádku. */
 static int line = 1;
@@ -107,25 +108,17 @@ static bool pending_dot = false;
 static bool at_line_start = true;
 /** Počet otevřených závorek ( a [. */
 static int paren_depth = 0;
-/** Zásobník úrovní odsazení, dno je 0. */
-static int *indent_stack = NULL;
-/** Index vrcholu zásobníku odsazení. */
-static int indent_top = 0;
-/** Kapacita zásobníku odsazení. */
-static int indent_cap = 0;
 /** Počet mezer na začátku aktuálního řádku. */
 static int line_indent = 0;
 /** Kolik DEDENTů ještě zbývá vrátit. */
 static int pending_dedents = 0;
 /** Po víceřádkovém komentáři smí být jen konec řádku. */
 static bool expect_line_end = false;
+/** Úrovně odsazení otevřených bloků. */
+static stack_t indent_stack;
 
 IFJ_ERR scanner_init(void) {
-  indent_stack = malloc(INDENT_STACK_INIT_CAP * sizeof(int));
-  CHECK_MEM_ERR(indent_stack);
-  indent_cap = INDENT_STACK_INIT_CAP;
-  indent_top = 0;
-  indent_stack[0] = 0; // Začátek souboru má odsazení 0
+  CHECK_ERR_RET(stack_init(&indent_stack));
 
   line = 1;
   pending_dot = false;
@@ -137,28 +130,23 @@ IFJ_ERR scanner_init(void) {
   return IFJ_SUCCESS;
 }
 
-void scanner_destroy(void) {
-  free(indent_stack);
-  indent_stack = NULL;
-  indent_top = 0;
-  indent_cap = 0;
-}
+void scanner_destroy(void) { stack_dtor(&indent_stack); }
 
 /**
- * @brief Vloží novou úroveň odsazení na zásobník.
- * @param level Počet mezer nové úrovně.
- * @return IFJ_SUCCESS, nebo IFJ_EINTERNAL při chybě alokace.
+ * @brief Zjistí odsazení aktuálního bloku (vrchol zásobníku).
+ * @param level Výstup: počet mezer, 0 pokud je zásobník prázdný.
+ * @return IFJ_SUCCESS, nebo chyba zásobníku.
  */
-static IFJ_ERR indent_push(int level) {
-  if (indent_top + 1 >= indent_cap) {
-    int *bigger = realloc(indent_stack, indent_cap * 2 * sizeof(int));
-    CHECK_MEM_ERR(bigger); // Při chybě zůstává indent_stack platný.
-    indent_stack = bigger;
-    indent_cap *= 2;
+static IFJ_ERR indent_current(int *level) {
+  bool empty;
+  CHECK_ERR_RET(stack_is_empty(&indent_stack, &empty));
+  if (empty) {
+    *level = 0;
+    return IFJ_SUCCESS;
   }
-
-  indent_top++;
-  indent_stack[indent_top] = level;
+  void *data;
+  CHECK_ERR_RET(stack_top(&indent_stack, &data));
+  *level = (int)(intptr_t)data;
   return IFJ_SUCCESS;
 }
 
@@ -205,26 +193,25 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
         if (at_line_start) {
           at_line_start = false;
-          int current = indent_stack[indent_top];
+          int current;
+          CHECK_ERR_RET(indent_current(&current));
 
           if (line_indent > current) {
-            // Větší odsazení - začátek bloku
-            IFJ_ERR err = indent_push(line_indent);
-            if (err != IFJ_SUCCESS) {
-              return err;
-            }
+            CHECK_ERR_RET(
+                stack_push(&indent_stack, (void *)(intptr_t)line_indent));
             ungetc(c, stdin);
             token->type = TOK_INDENT;
             return IFJ_SUCCESS;
           }
           if (line_indent < current) {
-            // Menší odsazení - konec bloku
             int count = 0;
-            while (indent_stack[indent_top] > line_indent) {
-              indent_top--;
+            void *popped;
+            while (current > line_indent) {
+              CHECK_ERR_RET(stack_pop(&indent_stack, &popped));
+              CHECK_ERR_RET(indent_current(&current));
               count++;
             }
-            if (indent_stack[indent_top] != line_indent) {
+            if (current != line_indent) {
               return IFJ_ELEX; // Odsazení neodpovídá žádné úrovni
             }
             ungetc(c, stdin);
@@ -294,11 +281,22 @@ IFJ_ERR scanner_next_token(token_t *token) {
           return IFJ_SUCCESS;
         }
 
-        if (indent_top > 0) {
-          pending_dedents = indent_top - 1;
-          indent_top = 0;
-          token->type = TOK_DEDENT;
-          return IFJ_SUCCESS;
+        {
+          // Zavřeme všechny otevřené bloky
+          int count = 0;
+          bool empty;
+          void *popped;
+          CHECK_ERR_RET(stack_is_empty(&indent_stack, &empty));
+          while (!empty) {
+            CHECK_ERR_RET(stack_pop(&indent_stack, &popped));
+            CHECK_ERR_RET(stack_is_empty(&indent_stack, &empty));
+            count++;
+          }
+          if (count > 0) {
+            pending_dedents = count - 1;
+            token->type = TOK_DEDENT;
+            return IFJ_SUCCESS;
+          }
         }
 
         token->type = TOK_EOF;
