@@ -39,7 +39,8 @@ IFJ_ERR dstring_append(dstring_t *str, char c);
 /**
  * @brief Uvolní paměť řetězce
  * @param str Řetězec
+ * @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL pokud je str NULL
  */
-void dstring_free(dstring_t *str);
+IFJ_ERR dstring_free(dstring_t *str);
 
 #endif
