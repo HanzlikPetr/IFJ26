@@ -23,21 +23,25 @@ IFJ_ERR dstring_init(dstring_t *str) {
 }
 
 IFJ_ERR dstring_append(dstring_t *str, char c) {
+  CHECK_ARGS_NULL_RET(str);
+
   if (str->len + 1 >= str->cap) {
     char *bigger = realloc(str->data, str->cap * 2);
     CHECK_MEM_ERR(bigger);
     str->data = bigger;
     str->cap *= 2;
   }
-  str->data[str->len] = c;
-  str->len++;
+  str->data[str->len++] = c;
   str->data[str->len] = '\0';
   return IFJ_SUCCESS;
 }
 
-void dstring_free(dstring_t *str) {
+IFJ_ERR dstring_free(dstring_t *str) {
+  CHECK_ARGS_NULL_RET(str);
+
   free(str->data);
   str->data = NULL;
   str->len = 0;
   str->cap = 0;
+  return IFJ_SUCCESS;
 }
