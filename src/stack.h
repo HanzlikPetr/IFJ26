@@ -98,7 +98,7 @@ IFJ_ERR stack_top(stack_t *stack, void **data_out);
  *
  * @param stack Zásobník, ze kterého se odstraňuje.
  * @param data_out Hodnota, která zachycuje odstraňovaný vrchol.
- * @return IFJ_EINTERNAL při poslání ukazatele NULL.
+ * @return IFJ_EINTERNAL při poslání ukazatele NULL místo ukazatele na zásobník.
  * @return IFJ_SUCCESS při úspěšném odstranění prvku ze zásobníku.
  */
 IFJ_ERR stack_pop(stack_t *stack, void **data_out);

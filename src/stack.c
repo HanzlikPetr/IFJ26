@@ -5,7 +5,6 @@
  * @author xberanm00 Marek Beran
  */
 
-#include <stdio.h>
 #include <stdlib.h>
 
 #include "stack.h"
@@ -80,7 +79,13 @@ IFJ_ERR stack_top(stack_t *stack, void **data_out) {
 }
 
 IFJ_ERR stack_pop(stack_t *stack, void **data_out) {
-  CHECK_ERR_RET(stack_top(stack, data_out));
+  if (data_out != NULL) {
+    // Odstranění a vrácení vrcholu zásobníku.
+    CHECK_ERR_RET(stack_top(stack, data_out));
+  } else {
+    // Pouze odstranění vrcholu zásobníku.
+    CHECK_ARG_NULL_RET(stack);
+  }
 
   stack_elem_t *temp = stack->top;
   stack->top = temp->next;
