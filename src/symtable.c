@@ -32,6 +32,91 @@ IFJ_ERR symtable_init(symtable_t *table) {
 }
 
 /**
+ * @brief Pomocná funkce pro hlubokou kopii dat tabulky symbolů.
+ * @param src Ukazatel na zdrojová data.
+ * @param dest Ukazatel na cílová data.
+ * @return IFJ_EINTERNAL při chybě alokace paměti.
+ * @return IFJ_SUCCESS při úspěšné kopii.
+ */
+static IFJ_ERR duplicate_data(const symtable_data_t *src,
+                              symtable_data_t *dest) {
+  CHECK_ARGS_NULL_RET(src, dest);
+
+  dest->is_function = src->is_function;
+
+  if (src->is_function) {
+    // Kopírování dat funkce
+    dest->func.is_main = src->func.is_main;
+    dest->func.is_resolving = src->func.is_resolving;
+    dest->func.return_type = src->func.return_type;
+    dest->func.return_type_explicit = src->func.return_type_explicit;
+    dest->func.param_list_count = src->func.param_list_count;
+
+    // Pokud je počet seznamu parametrů větší než 0 a zdrojové parametry jsou
+    // NULL, vrátíme chybu
+    if (dest->func.param_list_count > 0 && src->func.params == NULL) {
+      return IFJ_EINTERNAL;
+    }
+
+    // Pokud jsou zdrojové parametry NULL nebo počet seznamu parametrů je 0,
+    // nastavíme cílové parametry na NULL a vrátíme úspěch
+    if (!src->func.params || dest->func.param_list_count == 0) {
+      dest->func.params = NULL;
+      return IFJ_SUCCESS;
+    }
+
+    // Alokace paměti pro pole seznamu parametrů
+    dest->func.params =
+        malloc(sizeof(param_list_t) * dest->func.param_list_count);
+    CHECK_MEM_ERR(dest->func.params);
+
+    // Kopírování seznamu parametrů
+    for (int i = 0; i < dest->func.param_list_count; i++) {
+      dest->func.params[i].count = src->func.params[i].count;
+
+      // Pokud je počet typů v seznamu parametrů větší než 0 a zdrojové typy
+      // jsou NULL, nastavíme cílové typy na NULL
+      if (dest->func.params[i].count > 0 && src->func.params[i].types) {
+        dest->func.params[i].types =
+            malloc(sizeof(data_type_t) * dest->func.params[i].count);
+
+        // Kontrola alokace paměti pro typy parametrů, pokud selže, uvolníme již
+        // alokované paměti a vrátíme chybu
+        if (!dest->func.params[i].types) {
+          for (int j = 0; j < i; j++) {
+            free(dest->func.params[j].types);
+          }
+
+          free(dest->func.params);
+          dest->func.params = NULL;
+          return IFJ_EINTERNAL;
+        }
+
+        // Kopírování typů parametrů
+        memcpy(dest->func.params[i].types, src->func.params[i].types,
+               sizeof(data_type_t) * dest->func.params[i].count);
+      } else {
+        dest->func.params[i].types = NULL;
+      }
+    }
+  } else {
+    // Kopírování dat proměnné
+    dest->var.type = src->var.type;
+    dest->var.is_mutable = src->var.is_mutable;
+
+    // Kopírování názvu proměnné pro generování kódu
+    if (!src->var.code_gen_name) {
+      dest->var.code_gen_name = NULL;
+    } else {
+      dest->var.code_gen_name = strdup(src->var.code_gen_name);
+      CHECK_MEM_ERR(dest->var.code_gen_name);
+    }
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
  * @brief Pomocná funkce pro vytvoření nového uzlu AVL stromu.
  * @param key Klíč uzlu.
  * @param value Hodnota uzlu.
@@ -41,7 +126,10 @@ IFJ_ERR symtable_init(symtable_t *table) {
  */
 static IFJ_ERR create_node(const char *key, const symtable_data_t *value,
                            avl_node_t **new) {
-  avl_node_t *new_node = malloc(sizeof(avl_node_t));
+  avl_node_t *new_node;
+  symtable_data_t data = {0};
+
+  new_node = malloc(sizeof(avl_node_t));
   CHECK_MEM_ERR(new_node);
 
   // Inicializace nového uzlu
@@ -52,7 +140,14 @@ static IFJ_ERR create_node(const char *key, const symtable_data_t *value,
     return IFJ_EINTERNAL;
   }
 
-  new_node->data = *value;
+  if (CHECK_ERR(duplicate_data(value, &data))) {
+    free(new_node->key);
+    free(new_node);
+    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed for data.");
+    return IFJ_EINTERNAL;
+  }
+
+  new_node->data = data;
   new_node->height = 1;
   new_node->right = NULL;
   new_node->left = NULL;
@@ -246,9 +341,34 @@ IFJ_ERR symtable_find(symtable_t *table, const char *key,
   }
 
   err = avl_find(table->root, key, value);
-  CHECK_ERR_LOG_RET(err, "Key not found: %s", key);
+  if (CHECK_ERR(err)) {
+    LOG_ERR(err, "Key not found: %s", key);
+    *value = NULL;
+    return err;
+  }
 
   return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Pomocná funkce pro uvolnění dat tabulky symbolů.
+ * @param data Ukazatel na data.
+ */
+static void delete_data(symtable_data_t *data) {
+  if (data == NULL) {
+    return;
+  }
+
+  if (data->is_function) {
+    if (data->func.params) {
+      for (int i = 0; i < data->func.param_list_count; i++) {
+        free(data->func.params[i].types);
+      }
+      free(data->func.params);
+    }
+  } else {
+    free(data->var.code_gen_name);
+  }
 }
 
 /**
@@ -259,6 +379,7 @@ static void avl_destroy(avl_node_t *root) {
   if (root) {
     avl_destroy(root->left);
     avl_destroy(root->right);
+    delete_data(&root->data);
     free(root->key);
     free(root);
   }
