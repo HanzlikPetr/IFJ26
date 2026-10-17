@@ -1,8 +1,21 @@
 /**
  * @file test_scanner.c
- * @brief Projekt IFJ26 - jednotkové testy lexikálního analyzátoru
+ * @brief IFJ26 - jednotkové testy lexikálního analyzátoru
  *
  * @author xjurokv00 Vojtěch Jurok
+ *
+ * Testy vygenerovala AI (Claude, model Opus 5.5) podle tohoto zadání:
+ *
+ * "Napiš mi cmocka testy pro scanner (scanner.h, scanner.c) do
+ * tests/utest/test_scanner.c, použij setup_test.h. Scanner čte ze stdin,
+ * tak tam v testech podstrč vstup z řetězce. Otestuj operátory,
+ * identifikátory a klíčová slova, čísla (podtržítka, exponent, d/D, chyby
+ * jako 012 nebo 1_), řetězce s escape sekvencemi a víceřádkové, @main,
+ * komentáře i vnořené, EOL, závorky, odsazení INDENT/DEDENT a tabulátor.
+ * Dej tam i chybové vstupy, ať to vrací IFJ_ELEX, a ať to projde
+ * valgrindem bez úniků."
+ *
+ * Testy jsem pak prošel, spustil a upravoval podle změn ve scanneru.
  */
 
 // fmemopen() je POSIX funkce, s -std=c11 ji je nutné zpřístupnit.
