@@ -520,6 +520,10 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       default:
+        if (expect_line_end) {
+          return IFJ_ELEX;
+        }
+
         ungetc(c, stdin);
         at_line_start = false;
         token->type = TOK_DIV;
