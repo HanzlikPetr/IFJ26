@@ -735,6 +735,7 @@ static void test_block_comment_multiline(void **state) {
   EXPECT("x\n/* a\nb */\ny", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
   // Za víceřádkovým komentářem nesmí na stejném řádku být token.
   expect_error("x /* a\nb */ y", 2, IFJ_ELEX);
+  expect_error("x /* a\nb */ / 2", 2, IFJ_ELEX);
   // Uvnitř závorek je to jen bílý znak.
   EXPECT("f(x /* a\nb */ y)", TOK_ID, TOK_LPAREN, TOK_ID, TOK_ID, TOK_RPAREN,
          TOK_EOL, TOK_EOF);
