@@ -88,7 +88,8 @@ IFJ_ERR stack_push(stack_t *stack, void *data);
  *
  * @param stack Zásobník, jehož vrchol se ukazuje.
  * @param data_out Hodnota, kam se vrchol zapisuje.
- * @return IFJ_EINTERNAL při poslání ukazatele NULL.
+ * @return IFJ_EINTERNAL při poslání ukazatele NULL,
+ * nebo když je zásobník prázdný.
  * @return IFJ_SUCCESS při úspěšném ukázání vrcholu zásobníku.
  */
 IFJ_ERR stack_top(stack_t *stack, void **data_out);

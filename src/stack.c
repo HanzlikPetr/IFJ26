@@ -74,6 +74,14 @@ IFJ_ERR stack_push(stack_t *stack, void *data) {
 IFJ_ERR stack_top(stack_t *stack, void **data_out) {
   CHECK_ARGS_NULL_RET(stack, data_out);
 
+  bool is_empty = true;
+
+  CHECK_ERR_RET(stack_is_empty(stack, &is_empty));
+
+  if (is_empty) {
+    return IFJ_EINTERNAL;
+  }
+
   *data_out = stack->top->data;
   return IFJ_SUCCESS;
 }
