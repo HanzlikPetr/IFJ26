@@ -47,6 +47,9 @@
  * pointer is expected. Assert that they safely return IFJ_EINTERNAL."
  *
  * Model: Gemini 3.1 Pro
+ *
+ * Testy test_peek_empty_stack, test_pop_empty_stack a test_pop_no_data jsou
+ * dopsány ručně.
  */
 
 #include <stdbool.h>
@@ -175,6 +178,29 @@ static void test_deep_destruction(void **state) {
                    IFJ_SUCCESS);
 }
 
+static void test_peek_empty_stack(void **state) {
+  stack_t *stack = (stack_t *)(*state);
+  void *data;
+
+  assert_int_equal(stack_top(stack, &data), IFJ_EINTERNAL);
+}
+
+static void test_pop_empty_stack(void **state) {
+  stack_t *stack = (stack_t *)(*state);
+  void *data;
+
+  assert_int_equal(stack_pop(stack, &data), IFJ_EINTERNAL);
+}
+
+static void test_pop_no_data(void **state) {
+  stack_t *stack = (stack_t *)(*state);
+  int x = 1;
+  void *ptr = &x;
+
+  assert_int_equal(stack_push(stack, ptr), IFJ_SUCCESS);
+  assert_int_equal(stack_pop(stack, NULL), IFJ_SUCCESS);
+}
+
 /* --- Test Case 5: NULL Pointers --- */
 
 static void test_null_pointers(void **state) {
@@ -205,6 +231,12 @@ int main(void) {
       cmocka_unit_test_setup_teardown(test_check_empty_stack, test_setup,
                                       test_teardown),
       cmocka_unit_test_setup_teardown(test_deep_destruction, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_peek_empty_stack, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_pop_empty_stack, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_pop_no_data, test_setup,
                                       test_teardown),
       cmocka_unit_test(
           test_null_pointers) // Does not require valid initialization
