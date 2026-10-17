@@ -1,8 +1,17 @@
 /**
  * @file test_dstring.c
- * @brief Projekt IFJ26 - jednotkové testy dynamického řetězce
+ * @brief IFJ26 - jednotkové testy dynamického řetězce
  *
  * @author xjurokv00 Vojtěch Jurok
+ *
+ * Testy vygenerovala AI (Claude, model Opus 5.5) podle tohoto zadání:
+ *
+ * "Udělej cmocka testy pro dstring (dstring_init, dstring_append,
+ * dstring_free) do tests/utest/test_dstring.c. Ať to zkusí prázdný
+ * řetězec, přidávání znaků, zvětšení pole, když se nevejde, speciální
+ * znaky a uvolnění (i dvakrát po sobě)."
+ *
+ * Testy jsem prošel a spustil, procházejí i pod valgrindem.
  */
 
 #include <string.h>
