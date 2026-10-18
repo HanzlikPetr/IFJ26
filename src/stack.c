@@ -79,6 +79,7 @@ IFJ_ERR stack_top(stack_t *stack, void **data_out) {
   CHECK_ERR_RET(stack_is_empty(stack, &is_empty));
 
   if (is_empty) {
+    LOG_ERR(IFJ_EINTERNAL, "Stack cannot be empty.");
     return IFJ_EINTERNAL;
   }
 
@@ -93,6 +94,15 @@ IFJ_ERR stack_pop(stack_t *stack, void **data_out) {
   } else {
     // Pouze odstranění vrcholu zásobníku.
     CHECK_ARG_NULL_RET(stack);
+
+    bool is_empty = true;
+
+    CHECK_ERR_RET(stack_is_empty(stack, &is_empty));
+
+    if (is_empty) {
+      LOG_ERR(IFJ_EINTERNAL, "Stack cannot be empty.");
+      return IFJ_EINTERNAL;
+    }
   }
 
   stack_elem_t *temp = stack->top;
