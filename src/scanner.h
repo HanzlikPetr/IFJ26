@@ -8,6 +8,7 @@
 #ifndef SCANNER_H
 #define SCANNER_H
 
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "error.h"
@@ -105,6 +106,7 @@ typedef struct {
   token_type_t type;
   token_value_t value;
   int line;
+  bool newline_before; // Token začíná na novém řádku
 } token_t;
 
 /**
