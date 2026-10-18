@@ -200,9 +200,8 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
           }
           if (scanner->line_indent < current) {
             int count = 0;
-            void *popped;
             while (current > scanner->line_indent) {
-              CHECK_ERR_RET(stack_pop(&scanner->indent_stack, &popped));
+              CHECK_ERR_RET(stack_pop(&scanner->indent_stack, NULL));
               CHECK_ERR_RET(indent_current(scanner, &current));
               count++;
             }
@@ -280,10 +279,9 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
           // Zavřeme všechny otevřené bloky
           int count = 0;
           bool empty;
-          void *popped;
           CHECK_ERR_RET(stack_is_empty(&scanner->indent_stack, &empty));
           while (!empty) {
-            CHECK_ERR_RET(stack_pop(&scanner->indent_stack, &popped));
+            CHECK_ERR_RET(stack_pop(&scanner->indent_stack, NULL));
             CHECK_ERR_RET(stack_is_empty(&scanner->indent_stack, &empty));
             count++;
           }
