@@ -3,23 +3,19 @@
  * @brief IFJ26 - Unit testy pro tabulku symbolů (cmocka)
  *
  * @author xhanzlp00 Petr Hanzlík
+ * Tests (v3) created from the following prompt (model: GLM-5.3 via opencode):
  *
+ * "add test for traversal and add to test also type LIST to cover it"
+ *
+ * --------------------------------------------------------------------------
  * Tests (v2) created from the following prompt (model: GLM-5.3 via opencode):
  *
  * "please update tests for symtable.c to reflect the changes made in the
  * symtable.c file. Now i need to test new structure data, sometimes use
  * variable and sometimes function, also test create paramlist with 0 or more
  * paramlist, also check that insert create deep copy of data and that find
- * returns a deep copy of data, also check that destroy frees all memory
+ * value of a deep copy of data, also check that destroy frees all memory
  * allocated for data, including paramlist and types."
- *
- * Note on find semantics: symtable_find returns a pointer to the table's own
- * stored copy (the one made by symtable_insert), not a newly allocated copy.
- * Mutations through that pointer persist in the table - this is intended for
- * type inference in semantic analysis. The tests assert this semantic.
- * Freeing of all data by symtable_destroy (code_gen_name, param lists and
- * types) is verified by Valgrind, which is run by `make test`.
- * Rotation, NULL-pointer and empty-key tests were carried over from v1.
  *
  * --------------------------------------------------------------------------
  * Tests (v1) created from the following prompt (model: GLM-5.3 via opencode):
@@ -65,6 +61,7 @@
 
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -72,10 +69,46 @@
 #include "setup_test.h"
 #include "symtable.h"
 
+/** Pocet klicu, ktere muze traversal test navstivit. */
+#define TRAVERSE_MAX_KEYS 32
+
+/** Maximalni delka jednoho klice v traversal testu. */
+#define TRAVERSE_KEY_LEN 24
+
+/** Pocet klicu ve stresovacim testu. */
+#define STRESS_KEYS 127
+
+/** Stride pro zamichani poradi vkladani (37 je nesoudelne se 127). */
+#define STRESS_STRIDE 37
+
+/**
+ * @brief Stav testu sdileny setup/teardown funkci.
+ */
 typedef struct {
-  symtable_t table;
+  symtable_t table; /**< Testovaci tabulka symbolu */
 } test_state_t;
 
+/**
+ * @brief Stav pro callback funkce traversal testu.
+ */
+typedef struct {
+  char visited[TRAVERSE_MAX_KEYS][TRAVERSE_KEY_LEN]; /**< Navstivene klice */
+  size_t count;                                       /**< Pocet navstiveni */
+  const char *fail_on;  /**< Klic, na kterem callback selze (NULL = nikdy) */
+  IFJ_ERR fail_err;     /**< Chyba vracena pri selhani */
+} traverse_state_t;
+
+/**
+ * @brief Stav pro test integrity dat predavanych callbacku.
+ */
+typedef struct {
+  bool saw_var;  /**< Byl navstiven testovaci var? */
+  bool saw_func; /**< Byla navstivena testovaci funkce? */
+} traverse_seen_t;
+
+/**
+ * @brief Setup funkce pro testy - inicializuje tabulku symbolu.
+ */
 static int test_setup(void **state) {
   test_state_t *ts = malloc(sizeof(test_state_t));
   assert_non_null(ts);
@@ -88,6 +121,9 @@ static int test_setup(void **state) {
   return 0;
 }
 
+/**
+ * @brief Teardown funkce pro testy - uvolni tabulku symbolu.
+ */
 static int test_teardown(void **state) {
   test_state_t *ts = (test_state_t *)*state;
 
@@ -99,90 +135,135 @@ static int test_teardown(void **state) {
   return 0;
 }
 
-/* ------------------------- helpers for test data ------------------------- */
+/**
+ * @brief Deterministicky typ pro t-tou polozku pole typu parametru.
+ *
+ * @param t Index typu v seznamu parametru.
+ * @return Typ z cyklu INT/DOUBLE/STRING se stridavym priznakem is_list.
+ */
+static ifj26_type_t expected_type(size_t t) {
+  ifj26_type_t type = {(data_type_t)(t % 3), (t % 2) == 0};
+  return type;
+}
 
-/* Deterministic type used to fill the j-th position of a param type array. */
-static data_type_t expected_type(size_t j) { return (data_type_t)(j % 3); }
-
-/* Builds variable data with a heap-allocated code_gen_name (caller owns). */
-static symtable_data_t make_var_data(data_type_t type, bool is_mutable,
+/**
+ * @brief Vytvori data promenne pro vlozeni (kopii uvolni volajici
+ * free_var_data).
+ *
+ * @param base Zakladni typ promenne.
+ * @param is_list true, pokud je promenna seznam (List[T]).
+ * @param is_mutable true, pokud je promenna menitelna (var).
+ * @param code_gen_name Nazev pro generovani kodu (muze byt NULL).
+ * @return Vyplnena data promenne.
+ */
+static symtable_data_t make_var_data(data_type_t base, bool is_list,
+                                     bool is_mutable,
                                      const char *code_gen_name) {
   symtable_data_t data = {0};
 
   data.is_function = false;
-  data.var.type = type;
+  data.var.type.type = base;
+  data.var.type.is_list = is_list;
   data.var.is_mutable = is_mutable;
   if (code_gen_name != NULL) {
     data.var.code_gen_name = strdup(code_gen_name);
     assert_non_null(data.var.code_gen_name);
+  } else {
+    data.var.code_gen_name = NULL;
   }
 
   return data;
 }
 
-/* Frees the caller-owned heap members of variable data. */
+/**
+ * @brief Uvolni data promenne vytvorena make_var_data.
+ *
+ * @param data Data promenne k uvolneni.
+ */
 static void free_var_data(symtable_data_t *data) {
   free(data->var.code_gen_name);
   data->var.code_gen_name = NULL;
 }
 
-/* Builds function data with param_list_count lists; list_counts[i] gives the
- * number of types in the i-th list (may be 0). Caller owns all allocations. */
+/**
+ * @brief Vytvori data funkce pro vlozeni (kopii uvolni volajici
+ * free_func_data).
+ *
+ * Navigratovy typ je vzdy List[Double], typy parametru jsou vyplneny
+ * expected_type().
+ *
+ * @param param_list_count Pocet seznamu parametru.
+ * @param list_counts Pole poctu typu v jednotlivych seznamech.
+ * @return Vyplnena data funkce.
+ */
 static symtable_data_t make_func_data(int param_list_count,
                                       const int *list_counts) {
   symtable_data_t data = {0};
 
   data.is_function = true;
-  data.func.return_type = TYPE_DOUBLE;
+  data.func.return_type.type = TYPE_DOUBLE;
+  data.func.return_type.is_list = true;
   data.func.return_type_explicit = true;
   data.func.is_resolving = false;
   data.func.is_main = false;
   data.func.param_list_count = param_list_count;
 
-  if (param_list_count <= 0) {
-    return data;
-  }
-
-  data.func.params = malloc(sizeof(param_list_t) * (size_t)param_list_count);
-  assert_non_null(data.func.params);
-
-  for (int i = 0; i < param_list_count; i++) {
-    data.func.params[i].count = list_counts[i];
-    if (list_counts[i] > 0) {
-      data.func.params[i].types =
-          malloc(sizeof(data_type_t) * (size_t)list_counts[i]);
-      assert_non_null(data.func.params[i].types);
-      for (int j = 0; j < list_counts[i]; j++) {
-        data.func.params[i].types[j] = expected_type((size_t)j);
+  if (param_list_count > 0) {
+    data.func.params = malloc(sizeof(param_list_t) * (size_t)param_list_count);
+    assert_non_null(data.func.params);
+    for (int i = 0; i < param_list_count; i++) {
+      data.func.params[i].count = list_counts[i];
+      if (list_counts[i] > 0) {
+        data.func.params[i].types =
+            malloc(sizeof(ifj26_type_t) * (size_t)list_counts[i]);
+        assert_non_null(data.func.params[i].types);
+        for (int t = 0; t < list_counts[i]; t++) {
+          data.func.params[i].types[t] = expected_type((size_t)t);
+        }
+      } else {
+        data.func.params[i].types = NULL;
       }
-    } else {
-      data.func.params[i].types = NULL;
     }
+  } else {
+    data.func.params = NULL;
   }
 
   return data;
 }
 
-/* Frees the caller-owned heap members of function data. */
+/**
+ * @brief Uvolni data funkce vytvorena make_func_data.
+ *
+ * @param data Data funkce k uvolneni.
+ */
 static void free_func_data(symtable_data_t *data) {
-  for (int i = 0; i < data->func.param_list_count; i++) {
-    free(data->func.params[i].types);
+  if (data->func.params != NULL) {
+    for (int i = 0; i < data->func.param_list_count; i++) {
+      free(data->func.params[i].types);
+    }
+    free(data->func.params);
+    data->func.params = NULL;
   }
-  free(data->func.params);
-  data->func.params = NULL;
 }
 
-/* Checks that stored function data matches what make_func_data produced. */
+/**
+ * @brief Overi nalezenna data funkce proti make_func_data.
+ *
+ * @param found Nalezenna data funkce.
+ * @param param_list_count Ocekavany pocet seznamu parametru.
+ * @param list_counts Ocekavane pocty typu v seznamech parametru.
+ */
 static void verify_func_data(const symtable_data_t *found, int param_list_count,
                              const int *list_counts) {
   assert_true(found->is_function);
-  assert_int_equal(found->func.return_type, TYPE_DOUBLE);
+  assert_int_equal(found->func.return_type.type, TYPE_DOUBLE);
+  assert_true(found->func.return_type.is_list);
   assert_true(found->func.return_type_explicit);
   assert_false(found->func.is_resolving);
   assert_false(found->func.is_main);
   assert_int_equal(found->func.param_list_count, param_list_count);
 
-  if (param_list_count <= 0) {
+  if (param_list_count == 0) {
     assert_null(found->func.params);
     return;
   }
@@ -190,462 +271,644 @@ static void verify_func_data(const symtable_data_t *found, int param_list_count,
   assert_non_null(found->func.params);
   for (int i = 0; i < param_list_count; i++) {
     assert_int_equal(found->func.params[i].count, list_counts[i]);
-    if (list_counts[i] > 0) {
-      assert_non_null(found->func.params[i].types);
-      for (int j = 0; j < list_counts[i]; j++) {
-        assert_int_equal(found->func.params[i].types[j],
-                         expected_type((size_t)j));
-      }
-    } else {
+    if (list_counts[i] == 0) {
       assert_null(found->func.params[i].types);
+      continue;
+    }
+    assert_non_null(found->func.params[i].types);
+    for (int t = 0; t < list_counts[i]; t++) {
+      ifj26_type_t exp = expected_type((size_t)t);
+      assert_int_equal(found->func.params[i].types[t].type, exp.type);
+      assert_true(found->func.params[i].types[t].is_list == exp.is_list);
     }
   }
 }
 
-/* ------------------------------ test cases ------------------------------- */
+/**
+ * @brief Vlozi promennou do tabulky a overi uspech.
+ *
+ * @param table Tabulka symbolu.
+ * @param key Klic promenne.
+ * @param base Zakladni typ.
+ * @param is_list Priznak seznamu.
+ * @param is_mutable Priznak menitelnosti.
+ */
+static void insert_var(symtable_t *table, const char *key, data_type_t base,
+                       bool is_list, bool is_mutable) {
+  symtable_data_t data = make_var_data(base, is_list, is_mutable, key);
+  IFJ_ERR err = symtable_insert(table, key, &data);
+  free_var_data(&data);
+  assert_int_equal(err, IFJ_SUCCESS);
+}
 
-/* Insert and find variable data, including a NULL code_gen_name. */
-static void test_insert_and_find_variable(void **state) {
-  test_state_t *ts = (test_state_t *)*state;
+/**
+ * @brief Vlozi funkci do tabulky a overi uspech.
+ *
+ * @param table Tabulka symbolu.
+ * @param key Klic funkce.
+ * @param param_list_count Pocet seznamu parametru.
+ * @param list_counts Pocty typu v seznamech parametru.
+ */
+static void insert_func(symtable_t *table, const char *key,
+                        int param_list_count, const int *list_counts) {
+  symtable_data_t data = make_func_data(param_list_count, list_counts);
+  IFJ_ERR err = symtable_insert(table, key, &data);
+  free_func_data(&data);
+  assert_int_equal(err, IFJ_SUCCESS);
+}
+
+/**
+ * @brief Nalezne klic v tabulce a overi uspech.
+ *
+ * @param table Tabulka symbolu.
+ * @param key Klic hledaneho prvku.
+ * @return Ukazatel na nalezenna data (neni NULL).
+ */
+static symtable_data_t *find_key(symtable_t *table, const char *key) {
   symtable_data_t *found = NULL;
-  IFJ_ERR err;
-
-  symtable_data_t v1 = make_var_data(TYPE_INT, true, "LF@x_1");
-  err = symtable_insert(&ts->table, "x", &v1);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v1);
-
-  symtable_data_t v2 = make_var_data(TYPE_BOOL, false, NULL);
-  err = symtable_insert(&ts->table, "flag", &v2);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v2);
-
-  err = symtable_find(&ts->table, "x", &found);
+  IFJ_ERR err = symtable_find(table, key, &found);
   assert_int_equal(err, IFJ_SUCCESS);
   assert_non_null(found);
+  return found;
+}
+
+/**
+ * @brief Callback pro traversal testy - sbira navstivene klice.
+ *
+ * Pri shode klice s fail_on vraci fail_err (simulace chyby callbacku).
+ */
+static IFJ_ERR cb_collect(const char *key, const symtable_data_t *value,
+                          void *user_data) {
+  traverse_state_t *state = (traverse_state_t *)user_data;
+  (void)value;
+
+  if (state->fail_on != NULL && strcmp(key, state->fail_on) == 0) {
+    return state->fail_err;
+  }
+
+  if (state->count < TRAVERSE_MAX_KEYS) {
+    strcpy(state->visited[state->count], key);
+  }
+  state->count++;
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Callback pro test integrity dat predavanych traversal callbacku.
+ */
+static IFJ_ERR cb_check_data(const char *key, const symtable_data_t *value,
+                             void *user_data) {
+  traverse_seen_t *seen = (traverse_seen_t *)user_data;
+  static const int list_counts[] = {2, 1};
+
+  if (strcmp(key, "lst") == 0) {
+    assert_false(value->is_function);
+    assert_int_equal(value->var.type.type, TYPE_INT);
+    assert_true(value->var.type.is_list);
+    assert_false(value->var.is_mutable);
+    assert_non_null(value->var.code_gen_name);
+    assert_string_equal(value->var.code_gen_name, "LF@lst");
+    seen->saw_var = true;
+  } else if (strcmp(key, "fn") == 0) {
+    verify_func_data(value, 2, list_counts);
+    seen->saw_func = true;
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Test vlozeni a vyhledani promenne.
+ */
+static void test_insert_find_var(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+
+  insert_var(&ts->table, "x", TYPE_INT, false, true);
+  insert_var(&ts->table, "y", TYPE_DOUBLE, true, false);
+
+  symtable_data_t *found = find_key(&ts->table, "x");
   assert_false(found->is_function);
-  assert_int_equal(found->var.type, TYPE_INT);
+  assert_int_equal(found->var.type.type, TYPE_INT);
+  assert_false(found->var.type.is_list);
   assert_true(found->var.is_mutable);
-  assert_non_null(found->var.code_gen_name);
-  assert_string_equal(found->var.code_gen_name, "LF@x_1");
+  assert_string_equal(found->var.code_gen_name, "x");
 
-  err = symtable_find(&ts->table, "flag", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
-  assert_int_equal(found->var.type, TYPE_BOOL);
+  found = find_key(&ts->table, "y");
+  assert_false(found->is_function);
+  assert_int_equal(found->var.type.type, TYPE_DOUBLE);
+  assert_true(found->var.type.is_list);
   assert_false(found->var.is_mutable);
+  assert_string_equal(found->var.code_gen_name, "y");
+}
+
+/**
+ * @brief Test vlozeni a vyhledani promenne s NULL code_gen_name.
+ */
+static void test_insert_find_var_null_codegen(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+
+  symtable_data_t data = make_var_data(TYPE_STRING, false, true, NULL);
+  IFJ_ERR err = symtable_insert(&ts->table, "s", &data);
+  free_var_data(&data);
+  assert_int_equal(err, IFJ_SUCCESS);
+
+  symtable_data_t *found = find_key(&ts->table, "s");
+  assert_int_equal(found->var.type.type, TYPE_STRING);
   assert_null(found->var.code_gen_name);
 }
 
-/* Insert and find function data with several param lists. */
-static void test_insert_and_find_function(void **state) {
+/**
+ * @brief Test vlozeni a vyhledani funkce se seznamy parametru.
+ */
+static void test_insert_find_func(void **state) {
   test_state_t *ts = (test_state_t *)*state;
   const int list_counts[] = {2, 0, 3};
-  symtable_data_t *found = NULL;
-  IFJ_ERR err;
 
-  symtable_data_t f = make_func_data(3, list_counts);
-  err = symtable_insert(&ts->table, "f", &f);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_func_data(&f);
+  insert_func(&ts->table, "fn", 3, list_counts);
 
-  err = symtable_find(&ts->table, "f", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
+  symtable_data_t *found = find_key(&ts->table, "fn");
   verify_func_data(found, 3, list_counts);
 }
 
-/* Param lists with 0, 1 and N lists, and with 0 or more types per list. */
+/**
+ * @brief Test ruznych variant seznamu parametru funkce.
+ */
 static void test_param_list_variants(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  symtable_data_t *found = NULL;
-  IFJ_ERR err;
+  const int empty_lists[] = {0};
+  const int single[] = {5};
+  const int mixed[] = {0, 2, 0, 1};
 
-  /* no param list at all */
-  symtable_data_t f0 = make_func_data(0, NULL);
-  err = symtable_insert(&ts->table, "f0", &f0);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_func_data(&f0);
+  insert_func(&ts->table, "no_lists", 0, NULL);
+  insert_func(&ts->table, "one_empty", 1, empty_lists);
+  insert_func(&ts->table, "one_full", 1, single);
+  insert_func(&ts->table, "mixed", 4, mixed);
 
-  /* single empty list */
-  const int c1[] = {0};
-  symtable_data_t f1 = make_func_data(1, c1);
-  err = symtable_insert(&ts->table, "f1", &f1);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_func_data(&f1);
-
-  /* single list with several types */
-  const int c2[] = {5};
-  symtable_data_t f2 = make_func_data(1, c2);
-  err = symtable_insert(&ts->table, "f2", &f2);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_func_data(&f2);
-
-  /* several lists, mixed sizes */
-  const int c3[] = {0, 2, 0, 1};
-  symtable_data_t f3 = make_func_data(4, c3);
-  err = symtable_insert(&ts->table, "f3", &f3);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_func_data(&f3);
-
-  /* verify all four */
-  err = symtable_find(&ts->table, "f0", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  verify_func_data(found, 0, NULL);
-
-  err = symtable_find(&ts->table, "f1", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  verify_func_data(found, 1, c1);
-
-  err = symtable_find(&ts->table, "f2", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  verify_func_data(found, 1, c2);
-
-  err = symtable_find(&ts->table, "f3", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  verify_func_data(found, 4, c3);
+  verify_func_data(find_key(&ts->table, "no_lists"), 0, NULL);
+  verify_func_data(find_key(&ts->table, "one_empty"), 1, empty_lists);
+  verify_func_data(find_key(&ts->table, "one_full"), 1, single);
+  verify_func_data(find_key(&ts->table, "mixed"), 4, mixed);
 }
 
-/* Insert deep-copies the data: the caller frees its copies after insert and
- * the stored data stays intact and uses different allocations. */
-static void test_insert_creates_deep_copy(void **state) {
+/**
+ * @brief Test hluboke kopie - tabulka nevlastni data volajiciho.
+ */
+static void test_deep_copy_semantics(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  symtable_data_t *found = NULL;
-  IFJ_ERR err;
+  const int list_counts[] = {2, 0};
 
-  symtable_data_t v = make_var_data(TYPE_STRING, true, "LF@v_0");
-  const void *caller_code_gen_name = v.var.code_gen_name;
+  symtable_data_t data = make_func_data(2, list_counts);
+  param_list_t *caller_params = data.func.params;
+  ifj26_type_t *caller_types = data.func.params[0].types;
 
-  const int list_counts[] = {3};
-  symtable_data_t f = make_func_data(1, list_counts);
-  const param_list_t *caller_params = f.func.params;
-  const data_type_t *caller_types = f.func.params[0].types;
-
-  err = symtable_insert(&ts->table, "v", &v);
+  IFJ_ERR err = symtable_insert(&ts->table, "fn", &data);
   assert_int_equal(err, IFJ_SUCCESS);
-  err = symtable_insert(&ts->table, "g", &f);
-  assert_int_equal(err, IFJ_SUCCESS);
+  free_func_data(&data);
 
-  /* the caller releases its own copies after insert */
-  free_var_data(&v);
-  free_func_data(&f);
+  symtable_data_t *found = find_key(&ts->table, "fn");
+  verify_func_data(found, 2, list_counts);
+  assert_true(found->func.params != caller_params);
+  assert_true(found->func.params[0].types != caller_types);
 
-  /* stored copies are separate allocations with identical contents */
-  err = symtable_find(&ts->table, "v", &found);
+  symtable_data_t vdata = make_var_data(TYPE_STRING, true, false, "LF@s");
+  char *caller_cgn = vdata.var.code_gen_name;
+  err = symtable_insert(&ts->table, "s", &vdata);
   assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
-  assert_non_null(found->var.code_gen_name);
-  assert_string_equal(found->var.code_gen_name, "LF@v_0");
-  assert_true((const void *)found->var.code_gen_name != caller_code_gen_name);
+  free_var_data(&vdata);
 
-  err = symtable_find(&ts->table, "g", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
-  verify_func_data(found, 1, list_counts);
-  assert_true((const void *)found->func.params != caller_params);
-  assert_true((const void *)found->func.params[0].types != caller_types);
+  found = find_key(&ts->table, "s");
+  assert_string_equal(found->var.code_gen_name, "LF@s");
+  assert_true(found->var.code_gen_name != caller_cgn);
 }
 
-/* find returns a pointer to the table's stored copy; changes through it
- * persist (used by semantic analysis for type inference). */
-static void test_find_returns_mutable_pointer(void **state) {
+/**
+ * @brief Test ze find vraci zapisovatelny ukazatel do tabulky.
+ */
+static void test_find_mutable_pointer(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  symtable_data_t *found = NULL;
-  symtable_data_t *again = NULL;
-  IFJ_ERR err;
 
-  symtable_data_t v = make_var_data(TYPE_UNRESOLVED, false, NULL);
-  err = symtable_insert(&ts->table, "n", &v);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v);
+  insert_var(&ts->table, "x", TYPE_UNRESOLVED, false, true);
+  insert_func(&ts->table, "g", 0, NULL);
 
-  err = symtable_find(&ts->table, "n", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
-  assert_int_equal(found->var.type, TYPE_UNRESOLVED);
+  symtable_data_t *p1 = find_key(&ts->table, "x");
+  p1->var.type.type = TYPE_BOOL; // Odvozeni typu po analyzе
+  p1->var.is_mutable = false;
 
-  found->var.type = TYPE_INT; /* inference-style update in place */
+  symtable_data_t *p2 = find_key(&ts->table, "x");
+  assert_true(p1 == p2);
+  assert_int_equal(p2->var.type.type, TYPE_BOOL);
+  assert_false(p2->var.is_mutable);
 
-  err = symtable_find(&ts->table, "n", &again);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_ptr_equal(again, found);
-  assert_int_equal(again->var.type, TYPE_INT);
+  // Simulace priznaku reseni rekurze pri odvozovani typu
+  symtable_data_t *f1 = find_key(&ts->table, "g");
+  f1->func.is_resolving = true;
+  symtable_data_t *f2 = find_key(&ts->table, "g");
+  assert_true(f1 == f2);
+  assert_true(f2->func.is_resolving);
 }
 
-/* Function data with param_list_count > 0 but NULL params is rejected. */
-static void test_invalid_function_data(void **state) {
+/**
+ * @brief Test neplatnych dat funkce - param_list_count > 0 a params NULL.
+ */
+static void test_invalid_func_data(void **state) {
   test_state_t *ts = (test_state_t *)*state;
 
   symtable_data_t data = {0};
   data.is_function = true;
-  data.func.param_list_count = 2; /* params stays NULL */
+  data.func.return_type.type = TYPE_UNIT;
+  data.func.param_list_count = 2;
+  data.func.params = NULL;
 
   IFJ_ERR err = symtable_insert(&ts->table, "bad", &data);
   assert_int_equal(err, IFJ_EINTERNAL);
+
+  // Tabulka zustava pouzitelna
+  insert_var(&ts->table, "ok", TYPE_INT, false, true);
+  symtable_data_t *found = NULL;
+  err = symtable_find(&ts->table, "bad", &found);
+  assert_int_equal(err, IFJ_ESEM_UNDEF);
+  assert_null(found);
+  assert_non_null(find_key(&ts->table, "ok"));
 }
 
-/* Duplicate key must fail with IFJ_ESEM_REDEF and keep the original data. */
+/**
+ * @brief Test opakovaneho vlozeni stejneho klice.
+ */
 static void test_duplicated_insert(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  symtable_data_t *found = NULL;
-  IFJ_ERR err;
 
-  symtable_data_t v = make_var_data(TYPE_INT, true, NULL);
-  err = symtable_insert(&ts->table, "b", &v);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v);
+  insert_var(&ts->table, "b", TYPE_INT, false, true);
 
-  const int list_counts[] = {1};
-  symtable_data_t f = make_func_data(1, list_counts);
-  err = symtable_insert(&ts->table, "b", &f);
+  symtable_data_t data = make_var_data(TYPE_DOUBLE, true, false, "b");
+  IFJ_ERR err = symtable_insert(&ts->table, "b", &data);
+  free_var_data(&data);
   assert_int_equal(err, IFJ_ESEM_REDEF);
-  free_func_data(&f);
 
-  err = symtable_find(&ts->table, "b", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_false(found->is_function);
-  assert_int_equal(found->var.type, TYPE_INT);
+  // Puvodni data zustavaji nedotcena
+  symtable_data_t *found = find_key(&ts->table, "b");
+  assert_int_equal(found->var.type.type, TYPE_INT);
+  assert_false(found->var.type.is_list);
 }
 
-/* Find on an empty table and on a missing key returns IFJ_ESEM_UNDEF. */
+/**
+ * @brief Test vyhledani neexistujiciho klice (prazdna tabulka i po vlozeni).
+ */
 static void test_find_nonexistent(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  symtable_data_t *found = NULL;
-  IFJ_ERR err;
+  symtable_data_t *found = (symtable_data_t *)0x1;
 
-  err = symtable_find(&ts->table, "a", &found);
+  IFJ_ERR err = symtable_find(&ts->table, "missing", &found);
   assert_int_equal(err, IFJ_ESEM_UNDEF);
   assert_null(found);
 
-  symtable_data_t v = make_var_data(TYPE_INT, false, NULL);
-  err = symtable_insert(&ts->table, "b", &v);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v);
-
-  found = NULL;
+  insert_var(&ts->table, "b", TYPE_INT, false, true);
   err = symtable_find(&ts->table, "a", &found);
   assert_int_equal(err, IFJ_ESEM_UNDEF);
+  assert_null(found);
 }
 
-/* Rotation triggers (LL, LR, RR, RL) with mixed variable/function data. */
-static void test_rotations_and_complex_use(void **state) {
+/**
+ * @brief Test LL rotace (vlozeni g, e, c).
+ */
+static void test_rotations_ll(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  const char *ll_keys[] = {"g", "e", "c"};
-  const char *lr_keys[] = {"k", "i", "j"};
-  const char *rr_keys[] = {"m", "o", "q"};
-  const char *rl_keys[] = {"u", "w", "v"};
-  const char **key_sets[] = {ll_keys, lr_keys, rr_keys, rl_keys};
-  IFJ_ERR err;
 
-  for (size_t s = 0; s < 4; s++) {
-    for (size_t i = 0; i < 3; i++) {
-      char code_gen_name[16];
-      snprintf(code_gen_name, sizeof code_gen_name, "k%zu_%zu", s, i);
+  insert_var(&ts->table, "g", TYPE_INT, false, true);
+  insert_var(&ts->table, "e", TYPE_DOUBLE, true, false);
+  insert_var(&ts->table, "c", TYPE_STRING, false, false);
 
-      if ((s + i) % 2 == 0) {
-        symtable_data_t v =
-            make_var_data(TYPE_DOUBLE, i % 2 == 0, code_gen_name);
-        err = symtable_insert(&ts->table, key_sets[s][i], &v);
-        assert_int_equal(err, IFJ_SUCCESS);
-        free_var_data(&v);
-      } else {
-        const int list_counts[] = {(int)i, 1};
-        symtable_data_t f = make_func_data(2, list_counts);
-        err = symtable_insert(&ts->table, key_sets[s][i], &f);
-        assert_int_equal(err, IFJ_SUCCESS);
-        free_func_data(&f);
-      }
+  assert_int_equal(find_key(&ts->table, "g")->var.type.type, TYPE_INT);
+  assert_int_equal(find_key(&ts->table, "e")->var.type.type, TYPE_DOUBLE);
+  assert_true(find_key(&ts->table, "e")->var.type.is_list);
+  assert_int_equal(find_key(&ts->table, "c")->var.type.type, TYPE_STRING);
+}
+
+/**
+ * @brief Test LR rotace (vlozeni k, i, j).
+ */
+static void test_rotations_lr(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+  const int list_counts[] = {1};
+
+  insert_var(&ts->table, "k", TYPE_INT, false, true);
+  insert_var(&ts->table, "i", TYPE_DOUBLE, false, false);
+  insert_func(&ts->table, "j", 1, list_counts);
+
+  assert_int_equal(find_key(&ts->table, "k")->var.type.type, TYPE_INT);
+  assert_int_equal(find_key(&ts->table, "i")->var.type.type, TYPE_DOUBLE);
+  verify_func_data(find_key(&ts->table, "j"), 1, list_counts);
+}
+
+/**
+ * @brief Test RR rotace (vlozeni m, o, q).
+ */
+static void test_rotations_rr(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+
+  insert_var(&ts->table, "m", TYPE_INT, false, true);
+  insert_var(&ts->table, "o", TYPE_UNIT, true, true);
+  insert_var(&ts->table, "q", TYPE_BOOL, false, false);
+
+  assert_int_equal(find_key(&ts->table, "m")->var.type.type, TYPE_INT);
+  assert_true(find_key(&ts->table, "o")->var.type.is_list);
+  assert_int_equal(find_key(&ts->table, "q")->var.type.type, TYPE_BOOL);
+}
+
+/**
+ * @brief Test RL rotace (vlozeni u, w, v).
+ */
+static void test_rotations_rl(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+  const int list_counts[] = {0, 2};
+
+  insert_var(&ts->table, "u", TYPE_INT, false, true);
+  insert_var(&ts->table, "w", TYPE_DOUBLE, false, false);
+  insert_func(&ts->table, "v", 2, list_counts);
+
+  assert_int_equal(find_key(&ts->table, "u")->var.type.type, TYPE_INT);
+  assert_int_equal(find_key(&ts->table, "w")->var.type.type, TYPE_DOUBLE);
+  verify_func_data(find_key(&ts->table, "v"), 2, list_counts);
+}
+
+/**
+ * @brief Test traverse - serazene in-order poradi, kazdy klic prave jednou.
+ */
+static void test_traverse_sorted_order(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+  const char *keys[] = {"m", "a", "t", "b", "l", "c", "z", "d"};
+  const char *sorted[] = {"a", "b", "c", "d", "l", "m", "t", "z"};
+  const int list_counts[] = {1};
+
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    if (i % 2 == 0) {
+      insert_var(&ts->table, keys[i], (data_type_t)(i % 3), i % 2 == 0, true);
+    } else {
+      insert_func(&ts->table, keys[i], 1, list_counts);
     }
   }
 
-  /* Black-box verification of tree integrity after rotations */
-  for (size_t s = 0; s < 4; s++) {
-    for (size_t i = 0; i < 3; i++) {
-      symtable_data_t *found = NULL;
-      err = symtable_find(&ts->table, key_sets[s][i], &found);
-      assert_int_equal(err, IFJ_SUCCESS);
-      assert_non_null(found);
+  traverse_state_t trav = {0};
+  IFJ_ERR err = symtable_traverse(&ts->table, cb_collect, &trav);
+  assert_int_equal(err, IFJ_SUCCESS);
+  assert_int_equal(trav.count, sizeof(keys) / sizeof(keys[0]));
 
-      if ((s + i) % 2 == 0) {
-        char code_gen_name[16];
-        snprintf(code_gen_name, sizeof code_gen_name, "k%zu_%zu", s, i);
-        assert_string_equal(found->var.code_gen_name, code_gen_name);
-      } else {
-        const int list_counts[] = {(int)i, 1};
-        verify_func_data(found, 2, list_counts);
-      }
-    }
+  for (size_t i = 0; i < trav.count; i++) {
+    assert_string_equal(trav.visited[i], sorted[i]);
   }
 }
 
-/* Larger batch: 127 keys inserted in a deterministic scrambled order. */
-static void test_stress_many_keys(void **state) {
+/**
+ * @brief Test traverse nad prazdnou tabulkou.
+ */
+static void test_traverse_empty_table(void **state) {
   test_state_t *ts = (test_state_t *)*state;
-  enum { N = 127 };
-  enum { STRIDE = 37 }; /* coprime with N, so (k * STRIDE) % N is a shuffle */
-  IFJ_ERR err;
+  traverse_state_t trav = {0};
 
-  for (size_t k = 0; k < N; k++) {
-    /* j is the final key index: the data must be derived from j (the same
-     * index the verification loop below uses), not from the loop position */
-    int j = (int)((k * STRIDE) % N);
-    char key[16];
-    snprintf(key, sizeof key, "k%03d", j);
+  IFJ_ERR err = symtable_traverse(&ts->table, cb_collect, &trav);
+  assert_int_equal(err, IFJ_SUCCESS);
+  assert_int_equal(trav.count, 0);
+}
+
+/**
+ * @brief Test traverse s NULL callbackem a NULL tabulkou.
+ */
+static void test_traverse_null_callback(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+  traverse_state_t trav = {0};
+
+  IFJ_ERR err = symtable_traverse(&ts->table, NULL, &trav);
+  assert_int_equal(err, IFJ_EINTERNAL);
+
+  err = symtable_traverse(NULL, cb_collect, &trav);
+  assert_int_equal(err, IFJ_EINTERNAL);
+}
+
+/**
+ * @brief Test ze chyba callbacku se propaguje a zastavi prochazeni.
+ */
+static void test_traverse_error_propagates(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+  const char *keys[] = {"e", "a", "d", "b", "c"};
+
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    insert_var(&ts->table, keys[i], TYPE_INT, false, true);
+  }
+
+  traverse_state_t trav = {0};
+  trav.fail_on = "c";
+  trav.fail_err = IFJ_ESEM_ARGS;
+
+  IFJ_ERR err = symtable_traverse(&ts->table, cb_collect, &trav);
+  assert_int_equal(err, IFJ_ESEM_ARGS);
+
+  // Prochazeni zastaveno na "c" - navstiveny jsou pouze "a" a "b"
+  assert_int_equal(trav.count, 2);
+  assert_string_equal(trav.visited[0], "a");
+  assert_string_equal(trav.visited[1], "b");
+}
+
+/**
+ * @brief Test integrity dat predavanych callbacku traverse.
+ */
+static void test_traverse_data_integrity(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+  const int list_counts[] = {2, 1};
+  traverse_seen_t seen = {false, false};
+
+  symtable_data_t data =
+      make_var_data(TYPE_INT, true, false, "LF@lst"); // List[Int]
+  IFJ_ERR err = symtable_insert(&ts->table, "lst", &data);
+  free_var_data(&data);
+  assert_int_equal(err, IFJ_SUCCESS);
+
+  insert_func(&ts->table, "fn", 2, list_counts);
+
+  err = symtable_traverse(&ts->table, cb_check_data, &seen);
+  assert_int_equal(err, IFJ_SUCCESS);
+  assert_true(seen.saw_var);
+  assert_true(seen.saw_func);
+}
+
+/**
+ * @brief Test seznamovych typu - List[Int] a obycejna promenna.
+ */
+static void test_list_var_roundtrip(void **state) {
+  test_state_t *ts = (test_state_t *)*state;
+
+  insert_var(&ts->table, "l", TYPE_INT, true, false);   // List[Int]
+  insert_var(&ts->table, "s", TYPE_STRING, false, true);
+
+  symtable_data_t *found = find_key(&ts->table, "l");
+  assert_int_equal(found->var.type.type, TYPE_INT);
+  assert_true(found->var.type.is_list);
+  assert_false(found->var.is_mutable);
+
+  found = find_key(&ts->table, "s");
+  assert_int_equal(found->var.type.type, TYPE_STRING);
+  assert_false(found->var.type.is_list);
+  assert_true(found->var.is_mutable);
+}
+
+/**
+ * @brief Stresovy test - 127 klicu v zamichanem poradi, data odvozena z j.
+ */
+static void test_stress_127_keys(void **state) {
+  (void)state;
+  symtable_t table;
+  char key[8];
+  IFJ_ERR err = symtable_init(&table);
+  assert_int_equal(err, IFJ_SUCCESS);
+
+  // Vkladani v poradi dane stride permutaci, data odvozena od finalniho
+  // indexu klice j (nikoli od poradi vkladani k)
+  for (int k = 0; k < STRESS_KEYS; k++) {
+    int j = (k * STRESS_STRIDE) % STRESS_KEYS;
+    snprintf(key, sizeof(key), "k%03d", j);
 
     if (j % 2 == 0) {
-      symtable_data_t v = make_var_data((data_type_t)(j % 3), j % 4 != 0, key);
-      err = symtable_insert(&ts->table, key, &v);
-      assert_int_equal(err, IFJ_SUCCESS);
-      free_var_data(&v);
+      symtable_data_t data =
+          make_var_data((data_type_t)(j % 3), (j % 4) >= 2, (j % 3) != 0,
+                        (j % 5 == 0) ? NULL : key);
+      err = symtable_insert(&table, key, &data);
+      free_var_data(&data);
     } else {
-      int list_counts[2] = {(int)(j % 3), (int)(j % 2)};
-      symtable_data_t f = make_func_data(2, list_counts);
-      err = symtable_insert(&ts->table, key, &f);
-      assert_int_equal(err, IFJ_SUCCESS);
-      free_func_data(&f);
+      int list_counts[2] = {j % 3, j % 2};
+      symtable_data_t data = make_func_data(2, list_counts);
+      err = symtable_insert(&table, key, &data);
+      free_func_data(&data);
     }
+    assert_int_equal(err, IFJ_SUCCESS);
   }
 
-  for (size_t k = 0; k < N; k++) {
-    char key[16];
-    symtable_data_t *found = NULL;
-    snprintf(key, sizeof key, "k%03d", (int)k);
+  // Overeni vsech klicu a dat odvozenych od finalniho indexu j
+  for (int j = 0; j < STRESS_KEYS; j++) {
+    snprintf(key, sizeof(key), "k%03d", j);
+    symtable_data_t *found = find_key(&table, key);
 
-    err = symtable_find(&ts->table, key, &found);
-    assert_int_equal(err, IFJ_SUCCESS);
-    assert_non_null(found);
-
-    if (k % 2 == 0) {
-      assert_int_equal(found->var.type, (int)(k % 3));
-      assert_true(found->var.is_mutable == (k % 4 != 0));
-      assert_string_equal(found->var.code_gen_name, key);
+    if (j % 2 == 0) {
+      assert_false(found->is_function);
+      assert_int_equal(found->var.type.type, (data_type_t)(j % 3));
+      assert_true(found->var.type.is_list == ((j % 4) >= 2));
+      assert_true(found->var.is_mutable == ((j % 3) != 0));
+      if (j % 5 == 0) {
+        assert_null(found->var.code_gen_name);
+      } else {
+        assert_string_equal(found->var.code_gen_name, key);
+      }
     } else {
-      int list_counts[2] = {(int)(k % 3), (int)(k % 2)};
+      int list_counts[2] = {j % 3, j % 2};
       verify_func_data(found, 2, list_counts);
     }
   }
+
+  err = symtable_destroy(&table);
+  assert_int_equal(err, IFJ_SUCCESS);
 }
 
-/* The empty string is a valid key. */
-static void test_empty_key(void **state) {
-  test_state_t *ts = (test_state_t *)*state;
-  symtable_data_t *found = NULL;
-  IFJ_ERR err;
-
-  symtable_data_t v = make_var_data(TYPE_INT, true, "");
-  err = symtable_insert(&ts->table, "", &v);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v);
-
-  err = symtable_find(&ts->table, "", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
-  assert_non_null(found->var.code_gen_name);
-  assert_string_equal(found->var.code_gen_name, "");
-}
-
-/* NULL arguments are safely rejected with IFJ_EINTERNAL. */
+/**
+ * @brief Test NULL pointeru u vsech funkci API.
+ */
 static void test_null_pointers(void **state) {
-  (void)state;
-  symtable_data_t data = {0};
-  symtable_data_t *found = NULL;
-
-  IFJ_ERR err = symtable_init(NULL);
-  assert_int_equal(err, IFJ_EINTERNAL);
-
-  err = symtable_insert(NULL, "a", &data);
-  assert_int_equal(err, IFJ_EINTERNAL);
-
-  err = symtable_insert(NULL, NULL, NULL);
-  assert_int_equal(err, IFJ_EINTERNAL);
-
-  err = symtable_find(NULL, "a", &found);
-  assert_int_equal(err, IFJ_EINTERNAL);
-
-  err = symtable_find(NULL, "a", NULL);
-  assert_int_equal(err, IFJ_EINTERNAL);
-
-  err = symtable_destroy(NULL);
-  assert_int_equal(err, IFJ_EINTERNAL);
-}
-
-/* Destroy frees all data (code_gen_name, param lists, types - the actual
- * freeing is verified by Valgrind in `make test`) and the table structure
- * can be re-initialized and reused afterwards. */
-static void test_destroy_and_reuse(void **state) {
   (void)state;
   symtable_t table;
   symtable_data_t *found = NULL;
-  IFJ_ERR err;
+  traverse_state_t trav = {0};
 
-  /* destroy on a fresh, empty table */
-  err = symtable_init(&table);
-  assert_int_equal(err, IFJ_SUCCESS);
-  err = symtable_destroy(&table);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_null(table.root);
+  assert_int_equal(symtable_init(NULL), IFJ_EINTERNAL);
+  assert_int_equal(symtable_destroy(NULL), IFJ_EINTERNAL);
 
-  err = symtable_init(&table);
+  IFJ_ERR err = symtable_init(&table);
   assert_int_equal(err, IFJ_SUCCESS);
 
-  symtable_data_t v = make_var_data(TYPE_STRING, false, "LF@x_1");
-  err = symtable_insert(&table, "x", &v);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v);
+  symtable_data_t data = make_var_data(TYPE_INT, false, true, "x");
+  assert_int_equal(symtable_insert(NULL, "k", &data), IFJ_EINTERNAL);
+  assert_int_equal(symtable_insert(&table, NULL, &data), IFJ_EINTERNAL);
+  assert_int_equal(symtable_insert(&table, "k", NULL), IFJ_EINTERNAL);
+  free_var_data(&data);
 
-  const int list_counts[] = {2, 0, 3};
-  symtable_data_t f = make_func_data(3, list_counts);
-  err = symtable_insert(&table, "f", &f);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_func_data(&f);
+  assert_int_equal(symtable_find(NULL, "k", &found), IFJ_EINTERNAL);
+  assert_int_equal(symtable_find(&table, NULL, &found), IFJ_EINTERNAL);
+  assert_int_equal(symtable_find(&table, "k", NULL), IFJ_EINTERNAL);
+
+  assert_int_equal(symtable_traverse(NULL, cb_collect, &trav), IFJ_EINTERNAL);
+  assert_int_equal(symtable_traverse(&table, NULL, &trav), IFJ_EINTERNAL);
 
   err = symtable_destroy(&table);
   assert_int_equal(err, IFJ_SUCCESS);
-  assert_null(table.root);
-
-  /* the table structure can be re-initialized and reused */
-  err = symtable_init(&table);
-  assert_int_equal(err, IFJ_SUCCESS);
-
-  symtable_data_t v2 = make_var_data(TYPE_INT, true, NULL);
-  err = symtable_insert(&table, "y", &v2);
-  assert_int_equal(err, IFJ_SUCCESS);
-  free_var_data(&v2);
-
-  err = symtable_find(&table, "y", &found);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_non_null(found);
-  assert_int_equal(found->var.type, TYPE_INT);
-
-  err = symtable_destroy(&table);
-  assert_int_equal(err, IFJ_SUCCESS);
-  assert_null(table.root);
 }
 
+/**
+ * @brief Test uvolneni a opetovne inicializace tabulky.
+ */
+static void test_destroy_and_reuse(void **state) {
+  (void)state;
+  symtable_t table;
+  IFJ_ERR err = symtable_init(&table);
+  assert_int_equal(err, IFJ_SUCCESS);
+
+  // Uvolneni prazdne tabulky
+  err = symtable_destroy(&table);
+  assert_int_equal(err, IFJ_SUCCESS);
+  assert_null(table.root);
+
+  // Opetovna inicializace a pouziti
+  err = symtable_init(&table);
+  assert_int_equal(err, IFJ_SUCCESS);
+  insert_var(&table, "again", TYPE_INT, false, true);
+  symtable_data_t *found = find_key(&table, "again");
+  assert_int_equal(found->var.type.type, TYPE_INT);
+
+  err = symtable_destroy(&table);
+  assert_int_equal(err, IFJ_SUCCESS);
+}
+
+/**
+ * @brief Hlavni funkce testu.
+ *
+ * @return Vysledek behu testu.
+ */
 int main(void) {
   const struct CMUnitTest tests[] = {
-      cmocka_unit_test_setup_teardown(test_insert_and_find_variable, test_setup,
+      cmocka_unit_test_setup_teardown(test_insert_find_var, test_setup,
                                       test_teardown),
-      cmocka_unit_test_setup_teardown(test_insert_and_find_function, test_setup,
+      cmocka_unit_test_setup_teardown(test_insert_find_var_null_codegen,
+                                      test_setup, test_teardown),
+      cmocka_unit_test_setup_teardown(test_insert_find_func, test_setup,
                                       test_teardown),
       cmocka_unit_test_setup_teardown(test_param_list_variants, test_setup,
                                       test_teardown),
-      cmocka_unit_test_setup_teardown(test_insert_creates_deep_copy, test_setup,
+      cmocka_unit_test_setup_teardown(test_deep_copy_semantics, test_setup,
                                       test_teardown),
-      cmocka_unit_test_setup_teardown(test_find_returns_mutable_pointer,
-                                      test_setup, test_teardown),
-      cmocka_unit_test_setup_teardown(test_invalid_function_data, test_setup,
+      cmocka_unit_test_setup_teardown(test_find_mutable_pointer, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_invalid_func_data, test_setup,
                                       test_teardown),
       cmocka_unit_test_setup_teardown(test_duplicated_insert, test_setup,
                                       test_teardown),
       cmocka_unit_test_setup_teardown(test_find_nonexistent, test_setup,
                                       test_teardown),
-      cmocka_unit_test_setup_teardown(test_rotations_and_complex_use,
+      cmocka_unit_test_setup_teardown(test_rotations_ll, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_rotations_lr, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_rotations_rr, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_rotations_rl, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_traverse_sorted_order, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_traverse_empty_table, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_traverse_null_callback, test_setup,
+                                      test_teardown),
+      cmocka_unit_test_setup_teardown(test_traverse_error_propagates,
                                       test_setup, test_teardown),
-      cmocka_unit_test_setup_teardown(test_stress_many_keys, test_setup,
+      cmocka_unit_test_setup_teardown(test_traverse_data_integrity, test_setup,
                                       test_teardown),
-      cmocka_unit_test_setup_teardown(test_empty_key, test_setup,
+      cmocka_unit_test_setup_teardown(test_list_var_roundtrip, test_setup,
                                       test_teardown),
+      cmocka_unit_test(test_stress_127_keys),
       cmocka_unit_test(test_null_pointers),
       cmocka_unit_test(test_destroy_and_reuse),
   };
