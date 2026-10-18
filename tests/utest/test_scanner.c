@@ -45,6 +45,9 @@ static FILE *open_src(const char *src) {
 /** Původní stdin, vrací se po každém testu. */
 static FILE *original_stdin = NULL;
 
+/** Stav scanneru používaný v testech. */
+static scanner_t sc;
+
 /**
  * @brief Inicializuje scanner nad zadaným textem.
  *
@@ -56,7 +59,7 @@ static FILE *start_scanner(const char *src) {
   assert_non_null(f);
   original_stdin = stdin;
   stdin = f;
-  assert_int_equal(scanner_init(), IFJ_SUCCESS);
+  assert_int_equal(scanner_init(&sc), IFJ_SUCCESS);
   return f;
 }
 
@@ -65,7 +68,7 @@ static FILE *start_scanner(const char *src) {
  * @param f Proud vrácený ze start_scanner.
  */
 static void close_scanner(FILE *f) {
-  scanner_destroy();
+  scanner_destroy(&sc);
   fclose(f);
   stdin = original_stdin;
 }
@@ -75,7 +78,7 @@ static void close_scanner(FILE *f) {
  * @param tok Výstupní token.
  */
 static void next_ok(token_t *tok) {
-  assert_int_equal(scanner_next_token(tok), IFJ_SUCCESS);
+  assert_int_equal(scanner_next_token(&sc, tok), IFJ_SUCCESS);
 }
 
 /**
@@ -114,7 +117,7 @@ static void expect_error(const char *src, size_t ok_tokens,
     next_ok(&tok);
     token_free(&tok);
   }
-  assert_int_equal(scanner_next_token(&tok), expected_err);
+  assert_int_equal(scanner_next_token(&sc, &tok), expected_err);
   close_scanner(f);
 }
 
@@ -170,6 +173,22 @@ static void test_token_free_safe(void **state) {
   assert_int_equal(token_free(NULL), IFJ_EINTERNAL);
   token_t tok = {.type = TOK_ADD};
   assert_int_equal(token_free(&tok), IFJ_SUCCESS);
+}
+
+/**
+ * @brief Veřejné funkce scanneru odmítnou NULL argumenty.
+ */
+static void test_null_args(void **state) {
+  (void)state;
+  token_t tok;
+  assert_int_equal(scanner_init(NULL), IFJ_EINTERNAL);
+  assert_int_equal(scanner_next_token(NULL, &tok), IFJ_EINTERNAL);
+
+  FILE *f = start_scanner("x");
+  assert_int_equal(scanner_next_token(&sc, NULL), IFJ_EINTERNAL);
+  close_scanner(f);
+
+  scanner_destroy(NULL); // Nesmí spadnout.
 }
 
 /**
@@ -736,6 +755,8 @@ static void test_block_comment_multiline(void **state) {
   // Za víceřádkovým komentářem nesmí na stejném řádku být token.
   expect_error("x /* a\nb */ y", 2, IFJ_ELEX);
   expect_error("x /* a\nb */ / 2", 2, IFJ_ELEX);
+  // Další komentář za ním je v pořádku.
+  EXPECT("x /* a\nb */ // k\ny", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
   // Uvnitř závorek je to jen bílý znak.
   EXPECT("f(x /* a\nb */ y)", TOK_ID, TOK_LPAREN, TOK_ID, TOK_ID, TOK_RPAREN,
          TOK_EOL, TOK_EOF);
@@ -749,7 +770,7 @@ static void test_comment_line_numbers(void **state) {
   FILE *f = start_scanner("/* a\n*/ b");
   token_t tok;
   // "/* a\n*/" na samostatném řádku, za ním je token -> chyba.
-  assert_int_equal(scanner_next_token(&tok), IFJ_ELEX);
+  assert_int_equal(scanner_next_token(&sc, &tok), IFJ_ELEX);
   close_scanner(f);
 
   f = start_scanner("/* a\nb */\nc");
@@ -815,6 +836,33 @@ static void test_newline_in_parens(void **state) {
          TOK_EOF);
   EXPECT("f((\n))\n", TOK_ID, TOK_LPAREN, TOK_LPAREN, TOK_RPAREN, TOK_RPAREN,
          TOK_EOL, TOK_EOF);
+}
+
+/**
+ * @brief Ověří příznak newline_before u tokenu na daném pořadí (od 0).
+ */
+static void check_newline_before(const char *src, int index, bool expected) {
+  token_t tok;
+  FILE *f = first_token(src, &tok);
+  for (int i = 0; i < index; i++) {
+    token_free(&tok);
+    next_ok(&tok);
+  }
+  assert_int_equal(tok.newline_before, expected);
+  token_free(&tok);
+  close_scanner(f);
+}
+
+/**
+ * @brief Příznak konce řádku uvnitř závorek (kvůli koncové čárce).
+ */
+static void test_newline_before(void **state) {
+  (void)state;
+  check_newline_before("f(a,\n)", 4, true);
+  check_newline_before("f(a, )", 4, false);
+  check_newline_before("f(a,\n// k\n  b)", 4, true);
+  check_newline_before("f(a,\n)", 3, false);
+  check_newline_before("x\n\ny", 2, false);
 }
 
 /**
@@ -907,6 +955,7 @@ static void test_indent_in_parens(void **state) {
   EXPECT("f(a,\n      b)\nc\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_ID,
          TOK_RPAREN, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
 }
+
 /**
  * @brief Pokračovací řádek v závorce musí být odsazený víc než začátek
  * logického řádku; zavírací závorka, prázdné a komentářové řádky se
@@ -920,33 +969,6 @@ static void test_continuation_indent(void **state) {
          TOK_EOL, TOK_EOF);
   EXPECT("f(a,\n\n// k\n  b)\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_ID,
          TOK_RPAREN, TOK_EOL, TOK_EOF);
-}
-
-/**
- * @brief Ověří příznak newline_before u tokenu na daném pořadí (od 0).
- */
-static void check_newline_before(const char *src, int index, bool expected) {
-  token_t tok;
-  FILE *f = first_token(src, &tok);
-  for (int i = 0; i < index; i++) {
-    token_free(&tok);
-    next_ok(&tok);
-  }
-  assert_int_equal(tok.newline_before, expected);
-  token_free(&tok);
-  close_scanner(f);
-}
-
-/**
- * @brief Příznak konce řádku uvnitř závorek (kvůli koncové čárce).
- */
-static void test_newline_before(void **state) {
-  (void)state;
-  check_newline_before("f(a,\n)", 4, true);
-  check_newline_before("f(a, )", 4, false);
-  check_newline_before("f(a,\n// k\n  b)", 4, true);
-  check_newline_before("f(a,\n)", 3, false);
-  check_newline_before("x\n\ny", 2, false);
 }
 
 /**
@@ -1047,6 +1069,7 @@ int main(void) {
       cmocka_unit_test(test_empty_input),
       cmocka_unit_test(test_only_whitespace),
       cmocka_unit_test(test_token_free_safe),
+      cmocka_unit_test(test_null_args),
       cmocka_unit_test(test_unknown_chars),
       // Operátory
       cmocka_unit_test(test_single_char_tokens),
@@ -1100,6 +1123,7 @@ int main(void) {
       cmocka_unit_test(test_empty_lines_skipped),
       cmocka_unit_test(test_eol_added_at_eof),
       cmocka_unit_test(test_newline_in_parens),
+      cmocka_unit_test(test_newline_before),
       cmocka_unit_test(test_extra_closing_paren),
       // Odsazení
       cmocka_unit_test(test_tab_inside_line),
@@ -1111,7 +1135,6 @@ int main(void) {
       cmocka_unit_test(test_indent_ignores_empty_lines),
       cmocka_unit_test(test_indent_in_parens),
       cmocka_unit_test(test_continuation_indent),
-      cmocka_unit_test(test_newline_before),
       cmocka_unit_test(test_deep_indent),
       // Celý program
       cmocka_unit_test(test_spec_program),
