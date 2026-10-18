@@ -78,7 +78,7 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
       // jsou NULL, nastavíme cílové typy na NULL
       if (dest->func.params[i].count > 0 && src->func.params[i].types) {
         dest->func.params[i].types =
-            malloc(sizeof(data_type_t) * dest->func.params[i].count);
+            malloc(sizeof(ifj26_type_t) * dest->func.params[i].count);
 
         // Kontrola alokace paměti pro typy parametrů, pokud selže, uvolníme již
         // alokované paměti a vrátíme chybu
@@ -94,7 +94,7 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
 
         // Kopírování typů parametrů
         memcpy(dest->func.params[i].types, src->func.params[i].types,
-               sizeof(data_type_t) * dest->func.params[i].count);
+               sizeof(ifj26_type_t) * dest->func.params[i].count);
       } else {
         dest->func.params[i].types = NULL;
       }
@@ -328,7 +328,7 @@ static IFJ_ERR avl_find(avl_node_t *root, const char *key,
   return IFJ_ESEM_UNDEF;
 }
 
-IFJ_ERR symtable_find(symtable_t *table, const char *key,
+IFJ_ERR symtable_find(const symtable_t *table, const char *key,
                       symtable_data_t **value) {
   IFJ_ERR err;
 
@@ -337,6 +337,7 @@ IFJ_ERR symtable_find(symtable_t *table, const char *key,
 
   // Pokud je strom prázdný, vrátíme chybu
   if (!table->root) {
+    *value = NULL;
     return IFJ_ESEM_UNDEF;
   }
 
@@ -396,4 +397,45 @@ IFJ_ERR symtable_destroy(symtable_t *table) {
   table->root = NULL;
 
   return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Pomocná funkce pro rekurzivní procházení AVL stromu a volání callback
+ * funkce.
+ * @param node Ukazatel na uzel stromu.
+ * @param callback Callback funkce pro zpracování dat.
+ * @param user_data Uživatelská data předaná při volání symateble_traverse().
+ * @return IFJ_EINTERNAL při chybě, jinak IFJ_SUCCESS.
+ */
+static IFJ_ERR avl_traverse(avl_node_t *node, symtable_callback_t callback,
+                            void *user_data) {
+  IFJ_ERR err;
+
+  // Pokud je uzel NULL, vrátíme úspěch, protože jsme dosáhli konce stromu
+  if (!node) {
+    return IFJ_SUCCESS;
+  }
+
+  // Procházení levého podstromu
+  err = avl_traverse(node->left, callback, user_data);
+  CHECK_ERR_RET(err);
+
+  // Volání callback funkce pro aktuální uzel
+  err = callback(node->key, &node->data, user_data);
+  CHECK_ERR_LOG_RET(err, "Callback function failed for key: %s", node->key);
+
+  // Procházení pravého podstromu
+  err = avl_traverse(node->right, callback, user_data);
+  CHECK_ERR_RET(err);
+
+  return IFJ_SUCCESS;
+}
+
+IFJ_ERR symtable_traverse(const symtable_t *table, symtable_callback_t callback,
+                          void *user_data) {
+  // Kontrola proti NULL pointeru
+  CHECK_ARGS_NULL_RET(table, callback);
+
+  // Procházení stromu a volání callback funkce pro každý uzel
+  return avl_traverse(table->root, callback, user_data);
 }

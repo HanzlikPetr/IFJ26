@@ -38,10 +38,20 @@ typedef enum {
 } data_type_t;
 
 /**
- * @brief Struktura pro proměnné uložená v tabulce symbolů.
+ * @brief Wrapper pro typy dat v tabulce symbolů, který obsahuje informace o
+ * tom, zda je proměnná seznam nebo ne.
  */
 typedef struct {
   data_type_t type; /**< Typ dat */
+  bool is_list; /**< Flag, true = proměnná je seznam, false = proměnná není
+                   seznam */
+} ifj26_type_t;
+
+/**
+ * @brief Struktura pro proměnné uložená v tabulce symbolů.
+ */
+typedef struct {
+  ifj26_type_t type; /**< Typ dat */
   bool is_mutable; /**< Flag, true = proměnná je proměnlivá (var), false =
                       konstantní (val) nebo paramter funkce  */
   char *code_gen_name; /**< Název proměnné pro generování kódu,
@@ -53,14 +63,14 @@ typedef struct {
  */
 typedef struct {
   int count; /**< Počet parametrů */
-  data_type_t *types; /**< Pole typů parametrů */
+  ifj26_type_t *types; /**< Pole typů parametrů */
 } param_list_t;
 
 /**
  * @brief Struktura pro data funkce uložené v tabulce symbolů.
  */
 typedef struct {
-  data_type_t return_type; /**< Návratový typ funkce */
+  ifj26_type_t return_type; /**< Návratový typ funkce */
   bool return_type_explicit; /**< Flag, true = typ byl uveden v hlavičce, false
                                 = typ je odvozen */
   bool is_resolving; /**< Flag pro detekci cyklu v rekurzi při
@@ -81,6 +91,17 @@ typedef struct symtable_data {
     func_data_t func; /**< Data funkce */
   };
 } symtable_data_t;
+
+/**
+ * @brief Typ callback funkce pro procházení tabulky symbolů.
+ * @param key Klíč prvku.
+ * @param value Hodnota prvku.
+ * @param user_data Uživatelská data předaná při volání symtable_traverse().
+ * @return IFJ_EINTERNAL při chybě, jinak IFJ_SUCCESS.
+ */
+typedef IFJ_ERR (*symtable_callback_t)(const char *key,
+                                       const symtable_data_t *value,
+                                       void *user_data);
 
 /**
  * @brief Inicializace tabulky symbolu.
@@ -108,12 +129,12 @@ IFJ_ERR symtable_insert(symtable_t *table, const char *key,
  * @brief Vyhledá prvek v tabulce symbolů a vrátí jeho hodnotu.
  * @param table Ukazatel na tabulku symbolů.
  * @param key Klíč prvku.
- * @param value Ukazatel na hodnotu prvku.
+ * @param value Ukazatel na hodnotu prvku, kam se uloží výsledek.
  * @return IFJ_EINTERNAL při poslaní NULL pointeru.
  * @return IFJ_ESEM_UNDEF pokud prvek neexistuje.
  * @return IFJ_SUCCESS při úspěšném vyhledání.
  */
-IFJ_ERR symtable_find(symtable_t *table, const char *key,
+IFJ_ERR symtable_find(const symtable_t *table, const char *key,
                       symtable_data_t **value);
 
 /**
@@ -123,5 +144,16 @@ IFJ_ERR symtable_find(symtable_t *table, const char *key,
  * @return IFJ_SUCCESS při úspěšném uvolnění.
  */
 IFJ_ERR symtable_destroy(symtable_t *table);
+
+/**
+ * @brief Prochází tabulku symbolů a volá callback funkci pro každý prvek.
+ * @param table Ukazatel na tabulku symbolů.
+ * @param callback Callback funkce, která bude zavolána pro každý prvek.
+ * @param user_data Uživatelská data, která budou předány callback funkci.
+ * @return IFJ_EINTERNAL při poslaní NULL pointeru.
+ * @return IFJ_SUCCESS při úspěšném procházení.
+ */
+IFJ_ERR symtable_traverse(const symtable_t *table, symtable_callback_t callback,
+                          void *user_data);
 
 #endif // SYMTABLE_H
