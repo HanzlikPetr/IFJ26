@@ -161,6 +161,8 @@ IFJ_ERR token_free(token_t *token) {
 }
 
 IFJ_ERR scanner_next_token(token_t *token) {
+  CHECK_ARGS_NULL_RET(token);
+  token->newline_before = false;
   if (pending_dot) { // případ "1.", zbyla tečka
     pending_dot = false;
     token->line = line;
@@ -309,7 +311,13 @@ IFJ_ERR scanner_next_token(token_t *token) {
         if (paren_depth == 0) {
           line_indent = 0;
         }
-        if (paren_depth > 0 || at_line_start) {
+
+        if (paren_depth > 0) {
+          // Parser podle toho pozná povolenou koncovou čárku
+          token->newline_before = true;
+          break;
+        }
+        if (at_line_start) {
           break;
         }
         token->type = TOK_EOL;
