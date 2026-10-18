@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include "error.h"
+#include "stack.h"
 
 /**
  * @brief Klíčová slova jazyka IFJ26
@@ -106,21 +107,45 @@ typedef struct {
   token_type_t type;
   token_value_t value;
   int line;
-  bool newline_before; // Token začíná na novém řádku
+  bool newline_before; // Před tokenem byl uvnitř závorek konec řádku
 } token_t;
 
 /**
- * @brief Inicializace scanneru
- * @return IFJ_ERR úspěch, nebo chyba při alokaci
+ * @brief Vnitřní stav scanneru, drží si ho volající.
  */
-IFJ_ERR scanner_init(void);
+typedef struct {
+  /** Číslo aktuálního řádku. */
+  int line;
+  /** Příští token je tečka (po "1."). */
+  bool pending_dot;
+  /** Od posledního '\n' byly jen mezery. */
+  bool at_line_start;
+  /** Počet otevřených závorek ( a [. */
+  int paren_depth;
+  /** Počet mezer na začátku aktuálního řádku. */
+  int line_indent;
+  /** Kolik DEDENTů ještě zbývá vrátit. */
+  int pending_dedents;
+  /** Po víceřádkovém komentáři smí být jen konec řádku. */
+  bool expect_line_end;
+  /** Úrovně odsazení otevřených bloků. */
+  stack_t indent_stack;
+} scanner_t;
+
+/**
+ * @brief Inicializace scanneru
+ * @param scanner Výstup: inicializovaný stav scanneru
+ * @return IFJ_ERR úspěch, NULL argument, nebo chyba při alokaci
+ */
+IFJ_ERR scanner_init(scanner_t *scanner);
 
 /**
  * @brief Získani následujícího tokenu
+ * @param scanner Stav scanneru
  * @param token Výstupní token
  * @return IFJ_ERR úspěch, lexikální chyba, nebo interní chyba
  */
-IFJ_ERR scanner_next_token(token_t *token);
+IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token);
 
 /**
  * @brief Uvolnění paměti tokenu
@@ -131,7 +156,8 @@ IFJ_ERR token_free(token_t *token);
 
 /**
  * @brief Uvolnění vnitřní struktury scanneru
+ * @param scanner Stav scanneru (NULL nic neudělá)
  */
-void scanner_destroy(void);
+void scanner_destroy(scanner_t *scanner);
 
 #endif

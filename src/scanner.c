@@ -43,7 +43,7 @@ typedef enum {
   STATE_QUOTE,         // "
   STATE_EMPTY_STRING,  // "" (prázdný, nebo začátek """)
   STATE_STRING,        // "abc
-  STATE_STRING_ESCAPE, // "abc\ (esacape sekvence)
+  STATE_STRING_ESCAPE, // "abc\ (escape sekvence)
   STATE_ML_STRING,     // """abc
   STATE_ML_STRING_Q1,  // """abc"
   STATE_ML_STRING_Q2,  // """abc""
@@ -100,52 +100,42 @@ static const char *const keywords[] = {
 };
 #define KEYWORD_COUNT (sizeof keywords / sizeof keywords[0])
 
-/** Číslo aktuálního řádku. */
-static int line = 1;
-/** Příští token je tečka (po "1."). */
-static bool pending_dot = false;
-/** Od posledního '\n' byly jen mezery. */
-static bool at_line_start = true;
-/** Počet otevřených závorek ( a [. */
-static int paren_depth = 0;
-/** Počet mezer na začátku aktuálního řádku. */
-static int line_indent = 0;
-/** Kolik DEDENTů ještě zbývá vrátit. */
-static int pending_dedents = 0;
-/** Po víceřádkovém komentáři smí být jen konec řádku. */
-static bool expect_line_end = false;
-/** Úrovně odsazení otevřených bloků. */
-static stack_t indent_stack;
+IFJ_ERR scanner_init(scanner_t *scanner) {
+  CHECK_ARGS_NULL_RET(scanner);
+  CHECK_ERR_RET(stack_init(&scanner->indent_stack));
 
-IFJ_ERR scanner_init(void) {
-  CHECK_ERR_RET(stack_init(&indent_stack));
-
-  line = 1;
-  pending_dot = false;
-  at_line_start = true;
-  paren_depth = 0;
-  line_indent = 0;
-  pending_dedents = 0;
-  expect_line_end = false;
+  scanner->line = 1;
+  scanner->pending_dot = false;
+  scanner->at_line_start = true;
+  scanner->paren_depth = 0;
+  scanner->line_indent = 0;
+  scanner->pending_dedents = 0;
+  scanner->expect_line_end = false;
   return IFJ_SUCCESS;
 }
 
-void scanner_destroy(void) { stack_dtor(&indent_stack); }
+void scanner_destroy(scanner_t *scanner) {
+  if (scanner == NULL) {
+    return;
+  }
+  stack_dtor(&scanner->indent_stack);
+}
 
 /**
  * @brief Zjistí odsazení aktuálního bloku (vrchol zásobníku).
+ * @param scanner Stav scanneru.
  * @param level Výstup: počet mezer, 0 pokud je zásobník prázdný.
  * @return IFJ_SUCCESS, nebo chyba zásobníku.
  */
-static IFJ_ERR indent_current(int *level) {
+static IFJ_ERR indent_current(scanner_t *scanner, int *level) {
   bool empty;
-  CHECK_ERR_RET(stack_is_empty(&indent_stack, &empty));
+  CHECK_ERR_RET(stack_is_empty(&scanner->indent_stack, &empty));
   if (empty) {
     *level = 0;
     return IFJ_SUCCESS;
   }
   void *data;
-  CHECK_ERR_RET(stack_top(&indent_stack, &data));
+  CHECK_ERR_RET(stack_top(&scanner->indent_stack, &data));
   *level = (int)(intptr_t)data;
   return IFJ_SUCCESS;
 }
@@ -160,19 +150,21 @@ IFJ_ERR token_free(token_t *token) {
   return IFJ_SUCCESS;
 }
 
-IFJ_ERR scanner_next_token(token_t *token) {
+IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
+  CHECK_ARGS_NULL_RET(scanner);
   CHECK_ARGS_NULL_RET(token);
+
   token->newline_before = false;
-  if (pending_dot) { // případ "1.", zbyla tečka
-    pending_dot = false;
-    token->line = line;
+  if (scanner->pending_dot) { // případ "1.", zbyla tečka
+    scanner->pending_dot = false;
+    token->line = scanner->line;
     token->type = TOK_DOT;
     return IFJ_SUCCESS;
   }
   // Zbývající dedenty z minulého volání.
-  if (pending_dedents > 0) {
-    pending_dedents--;
-    token->line = line;
+  if (scanner->pending_dedents > 0) {
+    scanner->pending_dedents--;
+    token->line = scanner->line;
     token->type = TOK_DEDENT;
     return IFJ_SUCCESS;
   }
@@ -188,72 +180,72 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
     switch (state) {
     case STATE_START:
-      token->line = line;
+      token->line = scanner->line;
 
       if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
-        if (expect_line_end) {
+        if (scanner->expect_line_end) {
           return IFJ_ELEX; // Token za víceřádkovým komentářem.
         }
-        if (at_line_start) {
-          at_line_start = false;
+        if (scanner->at_line_start) {
+          scanner->at_line_start = false;
           int current;
-          CHECK_ERR_RET(indent_current(&current));
+          CHECK_ERR_RET(indent_current(scanner, &current));
 
-          if (line_indent > current) {
-            CHECK_ERR_RET(
-                stack_push(&indent_stack, (void *)(intptr_t)line_indent));
+          if (scanner->line_indent > current) {
+            CHECK_ERR_RET(stack_push(&scanner->indent_stack,
+                                     (void *)(intptr_t)scanner->line_indent));
             ungetc(c, stdin);
             token->type = TOK_INDENT;
             return IFJ_SUCCESS;
           }
-          if (line_indent < current) {
+          if (scanner->line_indent < current) {
             int count = 0;
             void *popped;
-            while (current > line_indent) {
-              CHECK_ERR_RET(stack_pop(&indent_stack, &popped));
-              CHECK_ERR_RET(indent_current(&current));
+            while (current > scanner->line_indent) {
+              CHECK_ERR_RET(stack_pop(&scanner->indent_stack, &popped));
+              CHECK_ERR_RET(indent_current(scanner, &current));
               count++;
             }
-            if (current != line_indent) {
+            if (current != scanner->line_indent) {
               return IFJ_ELEX; // Odsazení neodpovídá žádné úrovni
             }
             ungetc(c, stdin);
-            pending_dedents = count - 1; // Jeden vracíme hned.
+            scanner->pending_dedents = count - 1; // Jeden vracíme hned.
             token->type = TOK_DEDENT;
             return IFJ_SUCCESS;
           }
         }
-        at_line_start = false;
+        scanner->at_line_start = false;
       }
 
       switch (c) {
       case ' ':
-        if (at_line_start) {
-          line_indent++;
+        if (scanner->at_line_start) {
+          scanner->line_indent++;
         }
         break;
 
       case '(':
         token->type = TOK_LPAREN;
-        paren_depth++;
+        scanner->paren_depth++;
         return IFJ_SUCCESS;
 
       case ')':
         token->type = TOK_RPAREN;
-        if (paren_depth > 0) {
-          paren_depth--;
+        if (scanner->paren_depth > 0) {
+          scanner->paren_depth--;
         }
         return IFJ_SUCCESS;
 
       case '[':
         token->type = TOK_LBRACKET;
-        paren_depth++;
+        scanner->paren_depth++;
         return IFJ_SUCCESS;
 
       case ']':
         token->type = TOK_RBRACKET;
-        if (paren_depth > 0) {
-          paren_depth--;
+        if (scanner->paren_depth > 0) {
+          scanner->paren_depth--;
         }
         return IFJ_SUCCESS;
 
@@ -278,8 +270,8 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       case EOF:
-        if (!at_line_start) {
-          at_line_start = true;
+        if (!scanner->at_line_start) {
+          scanner->at_line_start = true;
           token->type = TOK_EOL;
           return IFJ_SUCCESS;
         }
@@ -289,14 +281,14 @@ IFJ_ERR scanner_next_token(token_t *token) {
           int count = 0;
           bool empty;
           void *popped;
-          CHECK_ERR_RET(stack_is_empty(&indent_stack, &empty));
+          CHECK_ERR_RET(stack_is_empty(&scanner->indent_stack, &empty));
           while (!empty) {
-            CHECK_ERR_RET(stack_pop(&indent_stack, &popped));
-            CHECK_ERR_RET(stack_is_empty(&indent_stack, &empty));
+            CHECK_ERR_RET(stack_pop(&scanner->indent_stack, &popped));
+            CHECK_ERR_RET(stack_is_empty(&scanner->indent_stack, &empty));
             count++;
           }
           if (count > 0) {
-            pending_dedents = count - 1;
+            scanner->pending_dedents = count - 1;
             token->type = TOK_DEDENT;
             return IFJ_SUCCESS;
           }
@@ -306,13 +298,13 @@ IFJ_ERR scanner_next_token(token_t *token) {
         return IFJ_SUCCESS;
 
       case '\n':
-        expect_line_end = false;
-        line++;
-        if (paren_depth == 0) {
-          line_indent = 0;
+        scanner->expect_line_end = false;
+        scanner->line++;
+        if (scanner->paren_depth == 0) {
+          scanner->line_indent = 0;
         }
 
-        if (paren_depth > 0) {
+        if (scanner->paren_depth > 0) {
           // Parser podle toho pozná povolenou koncovou čárku
           token->newline_before = true;
           // Spočítáme mezery na začátku pokračovacího řádku
@@ -326,16 +318,16 @@ IFJ_ERR scanner_next_token(token_t *token) {
 
           bool skip = next == '\n' || next == '/' || next == EOF ||
                       next == '\t' || next == ')' || next == ']';
-          if (!skip && spaces <= line_indent) {
-            return IFJ_ELEX;
+          if (!skip && spaces <= scanner->line_indent) {
+            return IFJ_ELEX; // Pokračovací řádek není odsazený víc
           }
           break;
         }
-        if (at_line_start) {
+        if (scanner->at_line_start) {
           break;
         }
         token->type = TOK_EOL;
-        at_line_start = true;
+        scanner->at_line_start = true;
         return IFJ_SUCCESS;
 
       case '<':
@@ -385,7 +377,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       case '\t':
-        if (at_line_start) {
+        if (scanner->at_line_start) {
           return IFJ_ELEX; // Tabulátor v odsazení
         }
         break;
@@ -515,7 +507,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         }
         // Zkontrolovat jestli je to klíčové slovo
         for (size_t i = 0; i < KEYWORD_COUNT; i++) {
-          if (keywords[i] != NULL && strcmp(str.data, keywords[i]) == 0) {
+          if (strcmp(str.data, keywords[i]) == 0) {
             token->type = TOK_KEYWORD;
             token->value.keyword = (keyword_t)i;
             dstring_free(&str);
@@ -542,12 +534,12 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       default:
-        if (expect_line_end) {
+        if (scanner->expect_line_end) {
           return IFJ_ELEX;
         }
 
         ungetc(c, stdin);
-        at_line_start = false;
+        scanner->at_line_start = false;
         token->type = TOK_DIV;
         return IFJ_SUCCESS;
       }
@@ -571,7 +563,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       case '\n':
-        line++;
+        scanner->line++;
         comment_newline = true;
         break;
 
@@ -590,11 +582,11 @@ IFJ_ERR scanner_next_token(token_t *token) {
         if (comment_depth == 0) {
           state = STATE_START;
           // Komentář s '\n' jako konec řádku
-          if (comment_newline && paren_depth == 0) {
-            expect_line_end = true;
-            line_indent = 0;
-            if (!at_line_start) {
-              at_line_start = true;
+          if (comment_newline && scanner->paren_depth == 0) {
+            scanner->expect_line_end = true;
+            scanner->line_indent = 0;
+            if (!scanner->at_line_start) {
+              scanner->at_line_start = true;
               token->type = TOK_EOL;
               return IFJ_SUCCESS;
             }
@@ -608,7 +600,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       case '\n':
-        line++;
+        scanner->line++;
         comment_newline = true;
         state = STATE_BLOCK_COMMENT;
         break;
@@ -633,7 +625,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         break;
 
       case '\n':
-        line++;
+        scanner->line++;
         comment_newline = true;
         state = STATE_BLOCK_COMMENT;
         break;
@@ -725,7 +717,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         state = STATE_DOUBLE;
       } else {
         ungetc(c, stdin);
-        pending_dot = true;
+        scanner->pending_dot = true;
         token->type = TOK_INT;
         token->value.int_value = strtoll(str.data, NULL, 10);
         dstring_free(&str);
@@ -933,7 +925,7 @@ IFJ_ERR scanner_next_token(token_t *token) {
         err = dstring_append(&str, (char)c);
         CHECK_ERR_GOTO(err, cleanup);
         if (c == '\n') {
-          line++;
+          scanner->line++;
         }
       }
       break;
