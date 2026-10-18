@@ -809,9 +809,9 @@ static void test_newline_in_parens(void **state) {
   (void)state;
   EXPECT("f(a,\n  b)\nx\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_ID,
          TOK_RPAREN, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
-  EXPECT("g(\n// koment\n1)\n", TOK_ID, TOK_LPAREN, TOK_INT, TOK_RPAREN,
+  EXPECT("g(\n// koment\n  1)\n", TOK_ID, TOK_LPAREN, TOK_INT, TOK_RPAREN,
          TOK_EOL, TOK_EOF);
-  EXPECT("l[\n1]\n", TOK_ID, TOK_LBRACKET, TOK_INT, TOK_RBRACKET, TOK_EOL,
+  EXPECT("l[\n  1]\n", TOK_ID, TOK_LBRACKET, TOK_INT, TOK_RBRACKET, TOK_EOL,
          TOK_EOF);
   EXPECT("f((\n))\n", TOK_ID, TOK_LPAREN, TOK_LPAREN, TOK_RPAREN, TOK_RPAREN,
          TOK_EOL, TOK_EOF);
@@ -906,6 +906,47 @@ static void test_indent_in_parens(void **state) {
   (void)state;
   EXPECT("f(a,\n      b)\nc\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_ID,
          TOK_RPAREN, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
+}
+/**
+ * @brief Pokračovací řádek v závorce musí být odsazený víc než začátek
+ * logického řádku; zavírací závorka, prázdné a komentářové řádky se
+ * nekontrolují.
+ */
+static void test_continuation_indent(void **state) {
+  (void)state;
+  expect_error("f(a,\nb)\n", 4, IFJ_ELEX);
+  expect_error("  f(a,\n  b)\n", 5, IFJ_ELEX);
+  EXPECT("f(\n  a,\n)\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_RPAREN,
+         TOK_EOL, TOK_EOF);
+  EXPECT("f(a,\n\n// k\n  b)\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_ID,
+         TOK_RPAREN, TOK_EOL, TOK_EOF);
+}
+
+/**
+ * @brief Ověří příznak newline_before u tokenu na daném pořadí (od 0).
+ */
+static void check_newline_before(const char *src, int index, bool expected) {
+  token_t tok;
+  FILE *f = first_token(src, &tok);
+  for (int i = 0; i < index; i++) {
+    token_free(&tok);
+    next_ok(&tok);
+  }
+  assert_int_equal(tok.newline_before, expected);
+  token_free(&tok);
+  close_scanner(f);
+}
+
+/**
+ * @brief Příznak konce řádku uvnitř závorek (kvůli koncové čárce).
+ */
+static void test_newline_before(void **state) {
+  (void)state;
+  check_newline_before("f(a,\n)", 4, true);
+  check_newline_before("f(a, )", 4, false);
+  check_newline_before("f(a,\n// k\n  b)", 4, true);
+  check_newline_before("f(a,\n)", 3, false);
+  check_newline_before("x\n\ny", 2, false);
 }
 
 /**
@@ -1069,6 +1110,8 @@ int main(void) {
       cmocka_unit_test(test_dedent_at_eof),
       cmocka_unit_test(test_indent_ignores_empty_lines),
       cmocka_unit_test(test_indent_in_parens),
+      cmocka_unit_test(test_continuation_indent),
+      cmocka_unit_test(test_newline_before),
       cmocka_unit_test(test_deep_indent),
       // Celý program
       cmocka_unit_test(test_spec_program),
