@@ -315,6 +315,20 @@ IFJ_ERR scanner_next_token(token_t *token) {
         if (paren_depth > 0) {
           // Parser podle toho pozná povolenou koncovou čárku
           token->newline_before = true;
+          // Spočítáme mezery na začátku pokračovacího řádku
+          int spaces = 0;
+          int next = fgetc(stdin);
+          while (next == ' ') {
+            spaces++;
+            next = fgetc(stdin);
+          }
+          ungetc(next, stdin);
+
+          bool skip = next == '\n' || next == '/' || next == EOF ||
+                      next == '\t' || next == ')' || next == ']';
+          if (!skip && spaces <= line_indent) {
+            return IFJ_ELEX;
+          }
           break;
         }
         if (at_line_start) {
