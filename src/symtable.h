@@ -117,8 +117,9 @@ IFJ_ERR symtable_init(symtable_t *table);
  * @param key Klíč prvku.
  * @param value Data pro uložení do tabulky symbolů, vytváří se hluboká kopie,
  * vaše data uvolněte po vložení.
- * @return IFJ_EINTERNAL při chybě alokace paměti, nebo pokud je poslán NULL
- * pointer.
+ * @return IFJ_EINTERNAL při chybě alokace paměti, pokud je poslán NULL
+ * pointer nebo při neplatných datech funkce (seznamy parametrů s kladným počtem
+ * typů a NULL ukazatelem).
  * @return IFJ_ESEM_REDEF pokud klíč již existuje v tabulce.
  * @return IFJ_SUCCESS při úspěšném vložení.
  */
