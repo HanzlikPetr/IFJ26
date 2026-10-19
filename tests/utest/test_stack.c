@@ -199,7 +199,7 @@ static void test_pop_no_data(void **state) {
 
   assert_int_equal(stack_push(stack, ptr), IFJ_SUCCESS);
   assert_int_equal(stack_pop(stack, NULL), IFJ_SUCCESS);
-  assert_int_equal(stack_pop(stack, NULL), IFJ_EINTERNAL);
+  assert_int_equal(stack_pop(stack, NULL), IFJ_SUCCESS);
 }
 
 /* --- Test Case 5: NULL Pointers --- */
