@@ -100,8 +100,8 @@ IFJ_ERR stack_pop(stack_t *stack, void **data_out) {
     CHECK_ERR_RET(stack_is_empty(stack, &is_empty));
 
     if (is_empty) {
-      LOG_ERR(IFJ_EINTERNAL, "Stack cannot be empty.");
-      return IFJ_EINTERNAL;
+      // Není co odstranit.
+      return IFJ_SUCCESS;
     }
   }
 
