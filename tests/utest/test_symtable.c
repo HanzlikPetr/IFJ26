@@ -3,6 +3,12 @@
  * @brief IFJ26 - Unit testy pro tabulku symbolů (cmocka)
  *
  * @author xhanzlp00 Petr Hanzlík
+ * Tests (v4) created from the following prompt (model: GLM-5.3 via opencode):
+ *
+ * "rewrite test that have wrong function parametrs, change check from NULL
+ * to IFJ_EINTERNAL, dont change header only add this prompt to header"
+ *
+ * --------------------------------------------------------------------------
  * Tests (v3) created from the following prompt (model: GLM-5.3 via opencode):
  *
  * "add test for traversal and add to test also type LIST to cover it"
@@ -509,11 +515,12 @@ static void test_find_mutable_pointer(void **state) {
 }
 
 /**
- * @brief Test neplatnych dat funkce - param_list_count > 0 a params NULL.
+ * @brief Test neplatnych dat funkce - chybi params ci types.
  */
 static void test_invalid_func_data(void **state) {
   test_state_t *ts = (test_state_t *)*state;
 
+  // Varianta 1: param_list_count > 0, ale params je NULL
   symtable_data_t data = {0};
   data.is_function = true;
   data.func.return_type.type = TYPE_UNIT;
@@ -527,6 +534,26 @@ static void test_invalid_func_data(void **state) {
   insert_var(&ts->table, "ok", TYPE_INT, false, true);
   symtable_data_t *found = NULL;
   err = symtable_find(&ts->table, "bad", &found);
+  assert_int_equal(err, IFJ_ESEM_UNDEF);
+  assert_null(found);
+  assert_non_null(find_key(&ts->table, "ok"));
+
+  // Varianta 2: param list s count > 0, ale types je NULL
+  param_list_t bad_list;
+  bad_list.count = 3;
+  bad_list.types = NULL;
+
+  symtable_data_t data2 = {0};
+  data2.is_function = true;
+  data2.func.return_type.type = TYPE_UNIT;
+  data2.func.param_list_count = 1;
+  data2.func.params = &bad_list;
+
+  err = symtable_insert(&ts->table, "bad_types", &data2);
+  assert_int_equal(err, IFJ_EINTERNAL);
+
+  // Tabulka zustava pouzitelna, chyby se nepropaguji
+  err = symtable_find(&ts->table, "bad_types", &found);
   assert_int_equal(err, IFJ_ESEM_UNDEF);
   assert_null(found);
   assert_non_null(find_key(&ts->table, "ok"));
