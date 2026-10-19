@@ -74,8 +74,16 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
     for (int i = 0; i < dest->func.param_list_count; i++) {
       dest->func.params[i].count = src->func.params[i].count;
 
+      // Pokud je počet typů v seznamu parametrů 0, nastavíme cílové typy na
+      // NULL
+      if (dest->func.params[i].count == 0) {
+        dest->func.params[i].types = NULL;
+        continue;
+      }
+
       // Pokud je počet typů v seznamu parametrů větší než 0 a zdrojové typy
-      // jsou NULL, nastavíme cílové typy na NULL
+      // nejsou NULL, alokujeme paměť pro typy parametrů a kopírujeme je, jinak
+      // vrátíme chybu
       if (dest->func.params[i].count > 0 && src->func.params[i].types) {
         dest->func.params[i].types =
             malloc(sizeof(ifj26_type_t) * dest->func.params[i].count);
@@ -96,7 +104,16 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
         memcpy(dest->func.params[i].types, src->func.params[i].types,
                sizeof(ifj26_type_t) * dest->func.params[i].count);
       } else {
-        dest->func.params[i].types = NULL;
+        LOG_ERR(IFJ_EINTERNAL,
+                "Invalid function data: param_list_count > 0 and params "
+                "is NULL for parameter list %d",
+                i);
+        for (int j = 0; j < i; j++) {
+          free(dest->func.params[j].types);
+        }
+        free(dest->func.params);
+        dest->func.params = NULL;
+        return IFJ_EINTERNAL;
       }
     }
   } else {
