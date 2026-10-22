@@ -184,7 +184,7 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
 
       if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
         if (scanner->expect_line_end) {
-          return IFJ_ELEX; // Token za víceřádkovým komentářem.
+          return IFJ_ESYNTAX; // Token za víceřádkovým komentářem.
         }
         if (scanner->at_line_start) {
           scanner->at_line_start = false;
@@ -206,7 +206,7 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
               count++;
             }
             if (current != scanner->line_indent) {
-              return IFJ_ELEX; // Odsazení neodpovídá žádné úrovni
+              return IFJ_ESYNTAX; // Odsazení neodpovídá žádné úrovni
             }
             ungetc(c, stdin);
             scanner->pending_dedents = count - 1; // Jeden vracíme hned.
@@ -317,7 +317,7 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
           bool skip = next == '\n' || next == '/' || next == EOF ||
                       next == '\t' || next == ')' || next == ']';
           if (!skip && spaces <= scanner->line_indent) {
-            return IFJ_ELEX; // Pokračovací řádek není odsazený víc
+            return IFJ_ESYNTAX; // Pokračovací řádek není odsazený víc
           }
           break;
         }
@@ -533,7 +533,7 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
 
       default:
         if (scanner->expect_line_end) {
-          return IFJ_ELEX;
+          return IFJ_ESYNTAX; // Token za víceřádkovým komentářem.
         }
 
         ungetc(c, stdin);

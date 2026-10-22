@@ -753,8 +753,8 @@ static void test_block_comment_multiline(void **state) {
   EXPECT("x /* a\nb */\ny", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
   EXPECT("x\n/* a\nb */\ny", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
   // Za víceřádkovým komentářem nesmí na stejném řádku být token.
-  expect_error("x /* a\nb */ y", 2, IFJ_ELEX);
-  expect_error("x /* a\nb */ / 2", 2, IFJ_ELEX);
+  expect_error("x /* a\nb */ y", 2, IFJ_ESYNTAX);
+  expect_error("x /* a\nb */ / 2", 2, IFJ_ESYNTAX);
   // Další komentář za ním je v pořádku.
   EXPECT("x /* a\nb */ // k\ny", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
   // Uvnitř závorek je to jen bílý znak.
@@ -770,7 +770,7 @@ static void test_comment_line_numbers(void **state) {
   FILE *f = start_scanner("/* a\n*/ b");
   token_t tok;
   // "/* a\n*/" na samostatném řádku, za ním je token -> chyba.
-  assert_int_equal(scanner_next_token(&sc, &tok), IFJ_ELEX);
+  assert_int_equal(scanner_next_token(&sc, &tok), IFJ_ESYNTAX);
   close_scanner(f);
 
   f = start_scanner("/* a\nb */\nc");
@@ -924,7 +924,7 @@ static void test_dedent(void **state) {
  */
 static void test_bad_dedent(void **state) {
   (void)state;
-  expect_error("a\n    b\n  c\n", 5, IFJ_ELEX);
+  expect_error("a\n    b\n  c\n", 5, IFJ_ESYNTAX);
 }
 
 /**
@@ -963,8 +963,8 @@ static void test_indent_in_parens(void **state) {
  */
 static void test_continuation_indent(void **state) {
   (void)state;
-  expect_error("f(a,\nb)\n", 4, IFJ_ELEX);
-  expect_error("  f(a,\n  b)\n", 5, IFJ_ELEX);
+  expect_error("f(a,\nb)\n", 4, IFJ_ESYNTAX);
+  expect_error("  f(a,\n  b)\n", 5, IFJ_ESYNTAX);
   EXPECT("f(\n  a,\n)\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_RPAREN,
          TOK_EOL, TOK_EOF);
   EXPECT("f(a,\n\n// k\n  b)\n", TOK_ID, TOK_LPAREN, TOK_ID, TOK_COMMA, TOK_ID,
