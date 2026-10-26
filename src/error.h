@@ -95,6 +95,33 @@ typedef enum {
   } while (0)
 
 /**
+ * @brief Makro pro kontrolu chybového kódu a přechod na label s logováním.
+ * @param err Chybový kód.
+ * @param goto_label Label pro přechod.
+ * @param ... Formátovací řetězec zprávy a jeho volitelné argumenty.
+ */
+#define CHECK_ERR_LOG_GOTO(err, goto_label, ...)                               \
+  do {                                                                         \
+    if (CHECK_ERR(err)) {                                                      \
+      LOG_ERR(err, __VA_ARGS__);                                               \
+      goto goto_label;                                                         \
+    }                                                                          \
+  } while (0)
+
+/**
+ * @brief Makro pro kontrolu alokace paměti a přechod na label.
+ * @param ptr Ukazatel na alokovanou paměť.
+ * @param goto_label Label pro přechod.
+ */
+#define CHECK_MEM_ERR_GOTO(ptr, goto_label)                                    \
+  do {                                                                         \
+    if ((ptr) == NULL) {                                                       \
+      LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed");                      \
+      goto goto_label;                                                         \
+    }                                                                          \
+  } while (0)
+
+/**
  * @brief Makro pro kontrolu null hodnoty argumentu a návratovou hodnotu.
  * @param arg Argument k kontrolě.
  */

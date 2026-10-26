@@ -210,3 +210,4 @@ void ast_free(ast_node_t *root) {
 
     free(root);
   }
+}
