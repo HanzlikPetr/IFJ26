@@ -130,6 +130,10 @@ typedef struct {
   bool expect_line_end;
   /** Úrovně odsazení otevřených bloků. */
   stack_t indent_stack;
+  /** Je v zásobě načtený token. */
+  bool has_peeked;
+  /** Načtený token přes peek. */
+  token_t peeked;
 } scanner_t;
 
 /**
@@ -143,9 +147,19 @@ IFJ_ERR scanner_init(scanner_t *scanner);
  * @brief Získani následujícího tokenu
  * @param scanner Stav scanneru
  * @param token Výstupní token
- * @return IFJ_ERR úspěch, lexikální chyba, nebo interní chyba
+ * @return IFJ_ERR úspěch, lexikální nebo syntaktickáchyba, nebo interní chyba
  */
 IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token);
+
+/**
+ * @brief Vrátí další token, ale nepřeskočí ho. Následující volání
+ * scanner_next_token vrátí tentýž token.
+ * @param scanner Stav scanneru.
+ * @param token Výstup: další token. Volající ho nesmí uvolňovat, uvolní
+ * ho až po převzetí přes scanner_next_token.
+ * @return IFJ_SUCCESS, nebo kód chyby.
+ */
+IFJ_ERR scanner_peek_next_token(scanner_t *scanner, token_t *token);
 
 /**
  * @brief Uvolnění paměti tokenu
