@@ -1063,6 +1063,63 @@ static void test_reinit(void **state) {
   close_scanner(f);
 }
 
+// ---------------------------------------------------------------------------
+// Peek
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Peek vrací pořád stejný token a next ho pak nepřeskočí.
+ */
+static void test_peek_same_token(void **state) {
+  (void)state;
+  FILE *f = start_scanner("x = 5");
+  token_t tok;
+
+  assert_int_equal(scanner_peek_next_token(&sc, &tok), IFJ_SUCCESS);
+  assert_int_equal(tok.type, TOK_ID);
+  assert_int_equal(scanner_peek_next_token(&sc, &tok), IFJ_SUCCESS);
+  assert_int_equal(tok.type, TOK_ID);
+
+  next_ok(&tok);
+  assert_int_equal(tok.type, TOK_ID);
+  assert_string_equal(tok.value.str_value, "x");
+  token_free(&tok);
+
+  next_ok(&tok);
+  assert_int_equal(tok.type, TOK_ASSIGN);
+  assert_int_equal(scanner_peek_next_token(&sc, &tok), IFJ_SUCCESS);
+  assert_int_equal(tok.type, TOK_INT);
+  next_ok(&tok);
+  assert_int_equal(tok.type, TOK_INT);
+  assert_int_equal(tok.value.int_value, 5);
+  close_scanner(f);
+}
+
+/**
+ * @brief Nevyzvednutý token z peeku uvolní scanner_destroy (valgrind).
+ */
+static void test_peek_then_destroy(void **state) {
+  (void)state;
+  FILE *f = start_scanner("abc");
+  token_t tok;
+  assert_int_equal(scanner_peek_next_token(&sc, &tok), IFJ_SUCCESS);
+  assert_int_equal(tok.type, TOK_ID);
+  close_scanner(f); // Token se nevyzvedl, musí ho uvolnit destroy.
+}
+
+/**
+ * @brief Peek vrátí i chybu a odmítne NULL argumenty.
+ */
+static void test_peek_errors(void **state) {
+  (void)state;
+  token_t tok;
+  FILE *f = start_scanner("#");
+  assert_int_equal(scanner_peek_next_token(&sc, &tok), IFJ_ELEX);
+  assert_int_equal(scanner_peek_next_token(NULL, &tok), IFJ_EINTERNAL);
+  assert_int_equal(scanner_peek_next_token(&sc, NULL), IFJ_EINTERNAL);
+  close_scanner(f);
+}
+
 int main(void) {
   const struct CMUnitTest tests[] = {
       // Inicializace
@@ -1139,6 +1196,10 @@ int main(void) {
       // Celý program
       cmocka_unit_test(test_spec_program),
       cmocka_unit_test(test_reinit),
+      // Peek
+      cmocka_unit_test(test_peek_same_token),
+      cmocka_unit_test(test_peek_then_destroy),
+      cmocka_unit_test(test_peek_errors),
   };
   return cmocka_run_group_tests(tests, NULL, NULL);
 }

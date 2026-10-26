@@ -111,12 +111,17 @@ IFJ_ERR scanner_init(scanner_t *scanner) {
   scanner->line_indent = 0;
   scanner->pending_dedents = 0;
   scanner->expect_line_end = false;
+  scanner->has_peeked = false;
   return IFJ_SUCCESS;
 }
 
 void scanner_destroy(scanner_t *scanner) {
   if (scanner == NULL) {
     return;
+  }
+  if (scanner->has_peeked) {
+    token_free(&scanner->peeked); // Nevyzvednutý token z peeku
+    scanner->has_peeked = false;
   }
   stack_dtor(&scanner->indent_stack);
 }
@@ -150,7 +155,7 @@ IFJ_ERR token_free(token_t *token) {
   return IFJ_SUCCESS;
 }
 
-IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
+static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
   CHECK_ARGS_NULL_RET(scanner);
   CHECK_ARGS_NULL_RET(token);
 
@@ -1002,4 +1007,29 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
 cleanup:
   dstring_free(&str);
   return err;
+}
+
+IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token) {
+  CHECK_ARGS_NULL_RET(scanner, token);
+
+  // Token už byl načtený přes peek, vrátíme ho ze zásoby
+  if (scanner->has_peeked) {
+    *token = scanner->peeked;
+    scanner->has_peeked = false;
+    return IFJ_SUCCESS;
+  }
+  return scanner_read_token(scanner, token);
+}
+
+IFJ_ERR scanner_peek_next_token(scanner_t *scanner, token_t *token) {
+  CHECK_ARGS_NULL_RET(scanner, token);
+
+  // Token ještě není v zásobě, načteme ho
+  if (!scanner->has_peeked) {
+    IFJ_ERR err = scanner_read_token(scanner, &scanner->peeked);
+    CHECK_ERR_RET(err);
+    scanner->has_peeked = true;
+  }
+  *token = scanner->peeked;
+  return IFJ_SUCCESS;
 }
