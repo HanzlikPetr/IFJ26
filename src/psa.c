@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "error.h"
 #include "psa.h"
@@ -52,7 +53,7 @@ typedef enum {
 typedef struct psa_stack_node {
   psa_symbol_t symbol; /**< Symbol PSA */
   ast_node_t *ast_node; /**< AST uzel odpovídající symbolu */
-  char *identifier; /**< Identifikátor pro symbol PSA_ID */
+  token_t *token; /**< Token odpovídající symbolu */
 } psa_stack_node_t;
 
 /**
@@ -183,22 +184,50 @@ static IFJ_ERR shift_tokens(token_t *current_token, token_t *next_token,
  * @brief Vytvoření uzlu zásobníku pro precedenční analýzu
  * @param symbol Symbol uzlu
  * @param ast_node AST uzel
- * @param identifier Identifikátor
+ * @param token Token odpovídající symbolu
  * @return Ukazatel na nově vytvořený uzel zásobníku nebo NULL v případě chyby
  */
 psa_stack_node_t *create_psa_stack_node(psa_symbol_t symbol,
-                                        ast_node_t *ast_node,
-                                        char *identifier) {
+                                        ast_node_t *ast_node, token_t *token) {
   psa_stack_node_t *node = malloc(sizeof(psa_stack_node_t));
   if (node == NULL) {
     return NULL; // Chyba alokace paměti
   }
   node->symbol = symbol;
   node->ast_node = ast_node;
-  node->identifier = identifier;
+  node->token = token;
   return node;
 }
 
+static token_t *copy_token(const token_t *source) {
+  token_t *copy;
+
+  if (source == NULL) {
+    return NULL;
+  }
+
+  copy = malloc(sizeof(*copy));
+  if (copy == NULL) {
+    return NULL;
+  }
+  *copy = *source;
+
+  if (source->type == TOK_STRING || source->type == TOK_ID) {
+    if (source->value.str_value == NULL) {
+      free(copy);
+      return NULL;
+    }
+
+    copy->value.str_value = malloc(strlen(source->value.str_value) + 1);
+    if (copy->value.str_value == NULL) {
+      free(copy);
+      return NULL;
+    }
+    strcpy(copy->value.str_value, source->value.str_value);
+  }
+
+  return copy;
+}
 static IFJ_ERR traverse_stack(stack_t *stack) {
   CHECK_ARG_NULL_RET(stack);
 
@@ -303,6 +332,7 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
   bool expect_operand, found_handle, is_empty, found_nonterm;
   int open_parens;
   char relation;
+  token_t *token = NULL;
   psa_symbol_t stack_top_symbol, input_symbol;
   psa_stack_node_t *push_node,
       *stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE], // Pole pro uchování
@@ -433,7 +463,9 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
       // Pokud je to identifikátor, tak by se sem měl uložit jeho název
 
       // Vložení symbolu z vstupu na zásobník
-      push_node = create_psa_stack_node(input_symbol, NULL, NULL);
+      token = copy_token(&parser->current_token);
+      CHECK_MEM_ERR_GOTO(token, cleanup);
+      push_node = create_psa_stack_node(input_symbol, NULL, token);
       CHECK_MEM_ERR_GOTO(push_node, cleanup);
       err = stack_push(&stack, (void *)push_node);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push symbol onto the stack");
@@ -570,7 +602,9 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
 
     } else if (relation == '=') {
       // Vložení symbolu z vstupu na zásobník
-      push_node = create_psa_stack_node(input_symbol, NULL, NULL);
+      token = copy_token(&parser->current_token);
+      CHECK_MEM_ERR_GOTO(token, cleanup);
+      push_node = create_psa_stack_node(input_symbol, NULL, token);
       CHECK_MEM_ERR_GOTO(push_node, cleanup);
       err = stack_push(&stack, (void *)push_node);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
