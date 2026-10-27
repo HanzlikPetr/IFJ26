@@ -8,7 +8,11 @@
 #ifndef IFJ_AST_H
 #define IFJ_AST_H
 
+#include <stdint.h> // Kvuli int64_t
+#include <stdlib.h> // Kvuli size_t
+
 #include "error.h"
+#include "scanner.h"
 #include "symtable.h"
 
 typedef enum {
@@ -18,6 +22,8 @@ typedef enum {
   AST_PARAM_LIST,
   AST_BLOCK,
   AST_EXPR,
+  AST_VAR,
+  AST_LITERAL,
   AST_DEF,
   AST_ASSIGN,
   AST_IF,
@@ -28,12 +34,16 @@ typedef enum {
   AST_FOR_GUARD,
   AST_WHILE,
   AST_FUNC_RET,
+  AST_FUNC_CALL,
 } ast_node_type_t;
 
 typedef struct ast_node ast_node_t;
 
 struct ast_node {
   ast_node_type_t type;
+  ifj26_type_t
+      inferred_type; /**< Odvozený typ výrazu, pokud je to relevantní */
+
   union {
     struct {
       ast_node_t **funcs;
@@ -53,6 +63,16 @@ struct ast_node {
       ast_node_t *rhs;
     } func_ret;
 
+    /**
+     * @brief Reprezentace volání funkce, metody nebo indexace seznamu (např.
+     * foo(1, 2), add(x)(y)).
+     */
+    struct {
+      ast_node_t *callee; /**< Volaný výraz */
+      ast_node_t **args;  /**< Pole argumentů (výrazů) v závorce */
+      size_t args_cnt;    /**< Počet argumentů */
+    } func_call;
+
     struct {
       ast_node_t **params;
       size_t params_cnt;
@@ -68,9 +88,54 @@ struct ast_node {
       size_t commands_cnt;
     } block;
 
+    /**
+     * @brief Reprezentace výrazu.
+     */
     struct {
+      bool is_unary; /**< Flag, true = unární operátor, false = binární operátor
+                      */
+      token_type_t
+          operator_type; /**< Typ operátoru (např. TOK_ADD, TOK_SUB, ...) */
+      union {
+        /**
+         * @brief Struktura pro binární operátory
+         */
+        struct {
+          ast_node_t *lhs; /**< Levý operand (pro binární operátory) */
+          ast_node_t *rhs; /**< Pravý operand (pro binární operátory) */
+        } binary;
 
+        /**
+         * @brief Struktura pro unární operátory
+         */
+        struct {
+          ast_node_t *operand; /**< Operand (pro unární operátory) */
+        } unary;
+      };
     } expr;
+
+    /**
+     * @brief Reprezentace proměnné.
+     */
+    struct {
+      char *id; /**< Název proměnné */
+    } var;
+
+    /**
+     * @brief Reprezentace literálu.
+     */
+    struct {
+      data_type_t type; /**< Typ literálu (např. TYPE_INT, TYPE_FLOAT,
+                           TYPE_STRING, ...) */
+      bool is_folded; /**< Flag, true = literál je složený (např. výsledek
+                         konstantní výrazu), false = literál je přímo zapsaný */
+      union {
+        int64_t int_value; /**< Hodnota literálu typu int */
+        double double_value; /**< Hodnota literálu typu double */
+        bool bool_value; /**< Hodnota literálu typu bool */
+        char *str_value; /**< Hodnota literálu typu string (alokovaná paměť) */
+      };
+    } literal;
 
     struct {
       bool mut;

@@ -206,8 +206,35 @@ void ast_free(ast_node_t *root) {
     break;
 
   case AST_EXPR:
+    if (root->as.expr.is_unary) {
+      ast_free(root->as.expr.unary.operand);
+    } else {
+      ast_free(root->as.expr.binary.lhs);
+      ast_free(root->as.expr.binary.rhs);
+    }
     break;
 
-    free(root);
+  case AST_VAR:
+    free(root->as.var.id);
+    break;
+
+  case AST_LITERAL:
+    if (root->as.literal.type == TYPE_STRING) {
+      free(root->as.literal.str_value);
+    }
+    break;
+
+  case AST_CALL:
+    ast_free(root->as.call.callee);
+    for (size_t i = 0; i < root->as.call.args_cnt; i++) {
+      ast_free(root->as.call.args[i]);
+    }
+    free(root->as.call.args);
+    break;
+
+  default:
+    break;
   }
+
+  free(root);
 }
