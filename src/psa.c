@@ -141,6 +141,7 @@ static psa_symbol_t token2psa_symbol(token_t *token, bool expect_operand,
   case TOK_FLOAT:
   case TOK_STRING:
   case TOK_ID:
+  case TOK_NULL:
     return PSA_ID;
   case TOK_KEYWORD:
     // Pokud je klíčové slovo true, false nebo list, tak je to operand
@@ -617,6 +618,46 @@ cleanup:
 }
 
 /**
+ * @brief Získá symbol aktuálního vstupního tokenu pro PSA.
+ * @param parser Parser.
+ * @param expect_operand True pokud se očekává operand.
+ * @param open_parens Počet otevřených závorek.
+ * @param input_symbol Výstupní symbol vstupu.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR get_input_symbol(parser_t *parser, bool expect_operand,
+                                int open_parens,
+                                psa_symbol_t *input_symbol) {
+  token_t peek_token;
+  IFJ_ERR err;
+
+  CHECK_ARGS_NULL_RET(parser, input_symbol);
+
+  if (parser->current_token.type == TOK_LPAREN) {
+    err = scanner_peek_next_token(parser->scanner, &peek_token);
+    CHECK_ERR_RET(err);
+
+    if (peek_token.type == TOK_RPAREN) {
+      *input_symbol = PSA_ID;
+
+      err = scanner_peek_next_token(parser->scanner, &peek_token);
+      CHECK_ERR_RET(err);
+
+      parser->current_token.line = peek_token.line;
+      parser->current_token.type = TOK_NULL;
+    } else {
+      *input_symbol = token2psa_symbol(&parser->current_token,
+                                       expect_operand, open_parens);
+    }
+  } else {
+    *input_symbol = token2psa_symbol(&parser->current_token, expect_operand,
+                                     open_parens);
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
  * @brief Zpracování výrazu pomocí precedenční analýzy
  * @param parser Parser
  * @param out_ast Výstupní AST uzel
@@ -668,8 +709,9 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
                        "Failed to restore non-terminal on the stack");
 
     // Získání symbolu z aktuálního tokenu a vyhledání vztahu v tabulce PSA
-    input_symbol =
-        token2psa_symbol(&parser->current_token, expect_operand, open_parens);
+    err = get_input_symbol(parser, expect_operand, open_parens, &input_symbol);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get input symbol");
+
     relation = psa_table_lookup(stack_top_symbol, input_symbol);
 
     CHECK_ERR_GOTO(traverse_stack(&stack), cleanup);
@@ -680,7 +722,7 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
                       &stack_array_get_nonterm_count, &stack_top_symbol);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
     } else if (relation == '>') {
-      err = psa_reduce(&stack, parser, input_symbol, &expression_done);
+      err = psa_reduce(&stack, parser, input_symbol, &expression_done, out_ast);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to reduce expression");
       if (expression_done) {
         break;
@@ -702,8 +744,7 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
   }
 
 cleanup:
-  /*dodelat*/
-  // ast_destroy(*out_ast); // musi dodelat ondi jinak to bude memory leak
+  ast_free(*out_ast);
   stack_deep_dtor(&stack, psa_stack_node_dtor);
   return err;
 }
