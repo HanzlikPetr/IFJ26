@@ -168,19 +168,6 @@ static char psa_table_lookup(psa_symbol_t stack_top, psa_symbol_t input) {
 }
 
 /**
- * @brief Posun tokenů při zpracování výrazu
- * @param current_token Aktuální token
- * @param next_token Následující token
- * @param scanner Stav scanneru
- * @return IFJ_ERR úspěch nebo chybový kód
- */
-static IFJ_ERR shift_tokens(token_t *current_token, token_t *next_token,
-                            scanner_t *scanner) {
-  *current_token = *next_token;
-  return scanner_next_token(scanner, next_token);
-}
-
-/**
  * @brief Vytvoření uzlu zásobníku pro precedenční analýzu
  * @param symbol Symbol uzlu
  * @param ast_node AST uzel
@@ -199,6 +186,11 @@ psa_stack_node_t *create_psa_stack_node(psa_symbol_t symbol,
   return node;
 }
 
+/**
+ * @brief Zkopíruje token.
+ * @param source Ukazatel na zdrojový token.
+ * @return Ukazatel na zkopírovaný token nebo NULL v případě chyby.
+ */
 static token_t *copy_token(const token_t *source) {
   token_t *copy;
 
@@ -228,6 +220,61 @@ static token_t *copy_token(const token_t *source) {
 
   return copy;
 }
+
+/**
+ * @brief Získá neterminál z vrcholu zásobníku, který není neterminál ani
+ * zarážka.
+ * @param stack Zásobník PSA.
+ * @param stack_array Pole pro uchování uzlů zásobníku při získávání
+ * neterminálu.
+ * @param out_count Počet uzlů v poli stack_array.
+ * @param stack_top_symbol Symbol na vrcholu zásobníku, který není neterminál
+ * ani zarážka.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
+                                      psa_stack_node_t *stack_array[],
+                                      int *out_count,
+                                      psa_symbol_t *stack_top_symbol,
+                                      parser_t *parser) {
+  CHECK_ARGS_NULL_RET(stack, stack_array, out_count);
+  void *data_out;
+  psa_stack_node_t *node;
+  bool found_nonterm = false;
+
+  *out_count = 0;
+
+  for (int i = 0; i < STACK_TOP_ARRAY_NONTERM_SIZE; i++) {
+    CHECK_ERR_LOG_RET(stack_top(stack, &data_out),
+                      "Failed to get top of stack");
+
+    node = (psa_stack_node_t *)data_out;
+
+    if (node->symbol != PSA_NONTERM && node->symbol != PSA_HANDLE) {
+      // Nalezen symbol, který není neterminál ani zarážka
+      *stack_top_symbol = node->symbol;
+      found_nonterm = true;
+      break;
+    }
+
+    CHECK_ERR_LOG_RET(stack_pop(stack, &data_out), "Failed to pop from stack");
+
+    stack_array[i] = node;
+    *out_count += 1;
+  }
+
+  if (!found_nonterm) {
+    // Pokud nebyl nalezen symbol, který není neterminál ani zarážka, tak je
+    // to chyba
+    CHECK_ERR_LOG_RET(IFJ_ESYNTAX,
+                      "Failed to find a valid symbol on the stack, on line %d",
+                      parser->current_token.line);
+  }
+
+  return IFJ_SUCCESS;
+}
+
 static IFJ_ERR traverse_stack(stack_t *stack) {
   CHECK_ARG_NULL_RET(stack);
 
@@ -319,6 +366,27 @@ static IFJ_ERR traverse_stack(stack_t *stack) {
   return IFJ_SUCCESS;
 }
 
+static IFJ_ERR push_single_nonterm(stack_t *stack, psa_stack_node_t *nodes[],
+                                   int node_count, parser_t *parser) {
+  CHECK_ARGS_NULL_RET(stack, nodes, parser);
+
+  if (node_count == 1) {
+    CHECK_ERR_LOG_RET(stack_push(stack, (void *)nodes[0]),
+                      "Failed to push symbol onto the stack");
+  } else if (node_count > 1) {
+    LOG_ERR(IFJ_ESYNTAX, "Expected 1 symbol, got %d, on line %d", node_count,
+            parser->current_token.line);
+    return IFJ_ESYNTAX;
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Uvolní uzel zásobníku PSA.
+ * @param data Ukazatel na uzel zásobníku PSA.
+ * @return IFJ_SUCCESS při úspěšném uvolnění nebo IFJ_EINTERNAL při chybě.
+ */
 static IFJ_ERR psa_stack_node_dtor(void *data) {
   psa_stack_node_t *node = data;
 
@@ -336,6 +404,219 @@ static IFJ_ERR psa_stack_node_dtor(void *data) {
 }
 
 /**
+ * @brief Zpracuje posun (shift) v precedenční analýze
+ * @param stack Zásobník PSA
+ * @param parser Parser používaný pro načtení dalšího tokenu
+ * @param input_symbol Symbol aktuálního tokenu
+ * @param expect_operand Určuje, zda se očekává operand
+ * @param open_parens Počet otevřených závorek
+ * @param stack_array_get_nonterm Pole pro uchování uzlů zásobníku při získávání
+ * neterminálu
+ * @param stack_array_get_nonterm_count Počet uzlů v poli
+ * stack_array_get_nonterm
+ * @param stack_top_symbol Symbol na vrcholu zásobníku, který není neterminál
+ * ani zarážka
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód
+ */
+static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
+                         psa_symbol_t input_symbol, bool *expect_operand,
+                         int *open_parens,
+                         psa_stack_node_t *stack_array_get_nonterm[],
+                         int *stack_array_get_nonterm_count,
+                         psa_symbol_t *stack_top_symbol) {
+  IFJ_ERR err;
+  token_t *token;
+  psa_stack_node_t *push_node;
+
+  CHECK_ARGS_NULL_RET(stack, parser, expect_operand, open_parens,
+                      stack_array_get_nonterm, stack_array_get_nonterm_count,
+                      stack_top_symbol);
+
+  err = get_nonterm_from_stack(stack, stack_array_get_nonterm,
+                               stack_array_get_nonterm_count, stack_top_symbol,
+                               parser);
+  CHECK_ERR_LOG_RET(err, "Failed to get non-terminal from stack");
+
+  push_node = create_psa_stack_node(PSA_HANDLE, NULL, NULL);
+  CHECK_MEM_ERR(push_node);
+  err = stack_push(stack, (void *)push_node);
+  CHECK_ERR_LOG_RET(err, "Failed to push handle onto the stack");
+
+  err = push_single_nonterm(stack, stack_array_get_nonterm,
+                            *stack_array_get_nonterm_count, parser);
+  CHECK_ERR_LOG_RET(err, "Failed to restore non-terminal on the stack");
+
+  token = copy_token(&parser->current_token);
+  CHECK_MEM_ERR(token);
+  push_node = create_psa_stack_node(input_symbol, NULL, token);
+  CHECK_MEM_ERR(push_node);
+  err = stack_push(stack, (void *)push_node);
+  CHECK_ERR_LOG_RET(err, "Failed to push symbol onto the stack");
+
+  if (input_symbol == PSA_L_PAREN) {
+    (*open_parens)++;
+  } else if (input_symbol == PSA_R_PAREN) {
+    (*open_parens)--;
+  }
+
+  *expect_operand = input_symbol != PSA_ID && input_symbol != PSA_R_PAREN;
+
+  return scanner_next_token(parser->scanner, &parser->current_token);
+}
+
+/**
+ * @brief Zpracuje vztah rovnosti v precedenční tabulce.
+ * @param stack Zásobník PSA.
+ * @param parser Parser používaný pro načtení dalšího tokenu.
+ * @param input_symbol Symbol aktuálního tokenu.
+ * @param expect_operand Určuje, zda se očekává operand.
+ * @param open_parens Počet otevřených závorek.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR psa_equal(stack_t *stack, parser_t *parser,
+                         psa_symbol_t input_symbol, bool *expect_operand,
+                         int *open_parens) {
+  IFJ_ERR err;
+  token_t *token;
+  psa_stack_node_t *push_node;
+
+  CHECK_ARGS_NULL_RET(stack, parser, expect_operand, open_parens);
+
+  token = copy_token(&parser->current_token);
+  CHECK_MEM_ERR(token);
+
+  push_node = create_psa_stack_node(input_symbol, NULL, token);
+  if (push_node == NULL) {
+    token_free(token);
+    free(token);
+    return IFJ_EINTERNAL;
+  }
+
+  err = stack_push(stack, (void *)push_node);
+  if (err != IFJ_SUCCESS) {
+    psa_stack_node_dtor(push_node);
+    return err;
+  }
+
+  if (input_symbol == PSA_L_PAREN) {
+    (*open_parens)++;
+  } else if (input_symbol == PSA_R_PAREN) {
+    (*open_parens)--;
+  }
+
+  *expect_operand = input_symbol != PSA_ID && input_symbol != PSA_R_PAREN;
+
+  return scanner_next_token(parser->scanner, &parser->current_token);
+}
+
+/**
+ * @brief Redukuje handle na neterminál E.
+ * @param stack Zásobník PSA.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @param input_symbol Aktuální vstupní symbol.
+ * @param expression_done Nastaví se na true při úspěšném ukončení výrazu.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
+                          psa_symbol_t input_symbol, bool *expression_done) {
+  IFJ_ERR err = IFJ_SUCCESS;
+  bool found_handle = false;
+  bool is_empty;
+  void *data_out = NULL;
+  int reduce_count = 0;
+  psa_stack_node_t *reduce_nodes[STACK_TOP_ARRAY_REDUCE_SIZE];
+  psa_stack_node_t *push_node = NULL;
+
+  CHECK_ARGS_NULL_RET(stack, parser, expression_done);
+  *expression_done = false;
+
+  err = stack_is_empty(stack, &is_empty);
+  CHECK_ERR_LOG_RET(err, "Failed to check if stack is empty");
+
+  for (int i = 0; i < STACK_TOP_ARRAY_REDUCE_SIZE && !is_empty; i++) {
+    err = stack_is_empty(stack, &is_empty);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to check if stack is empty");
+    if (is_empty) {
+      break;
+    }
+
+    err = stack_pop(stack, &data_out);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to pop from stack");
+    reduce_nodes[reduce_count++] = (psa_stack_node_t *)data_out;
+
+    if (reduce_nodes[reduce_count - 1]->symbol == PSA_HANDLE) {
+      found_handle = true;
+      break;
+    }
+  }
+
+  // Pokud nebyla nalezena zarážka, zkontrolujeme, zda-li se jedná o konec
+  // výrazu
+  if (!found_handle) {
+    if (input_symbol == PSA_DOLLAR && reduce_count == 3 &&
+        reduce_nodes[0]->symbol == PSA_DOLLAR &&
+        reduce_nodes[1]->symbol == PSA_NONTERM &&
+        reduce_nodes[2]->symbol == PSA_DOLLAR) {
+      *expression_done = true;
+      goto cleanup;
+    }
+
+    err = IFJ_ESYNTAX;
+    LOG_ERR(err, "Failed to find a handle symbol on the stack, on line %d",
+            parser->current_token.line);
+    goto cleanup;
+  }
+
+  if (reduce_nodes[0]->symbol == PSA_ID) {
+    // Pravidlo 1: E -> id
+    printf("Redukce E -> id\n");
+  } else if (reduce_count == 4 && reduce_nodes[0]->symbol == PSA_R_PAREN &&
+             reduce_nodes[1]->symbol == PSA_NONTERM &&
+             reduce_nodes[2]->symbol == PSA_L_PAREN) {
+    // Pravidlo 2: E -> (E)
+    printf("Redukce E -> (E)\n");
+  } else if (reduce_count == 4 && reduce_nodes[0]->symbol == PSA_NONTERM &&
+             (reduce_nodes[1]->symbol == PSA_ADD_SUB ||
+              reduce_nodes[1]->symbol == PSA_MUL_DIV ||
+              reduce_nodes[1]->symbol == PSA_DOT ||
+              reduce_nodes[1]->symbol == PSA_EQ_OP ||
+              reduce_nodes[1]->symbol == PSA_REL_OP ||
+              reduce_nodes[1]->symbol == PSA_AND_OP ||
+              reduce_nodes[1]->symbol == PSA_OR_OP) &&
+             reduce_nodes[2]->symbol == PSA_NONTERM) {
+    // Pravidlo 3: E -> E op E
+    printf("Redukce E -> E op E\n");
+  } else if (reduce_count == 3 && reduce_nodes[0]->symbol == PSA_NONTERM &&
+             reduce_nodes[1]->symbol == PSA_UNARY) {
+    // Pravidlo 4: E -> op E
+    printf("Redukce E -> op E\n");
+  } else {
+    err = IFJ_ESYNTAX;
+    LOG_ERR(err,
+            "Failed to match a reduction rule for the stack symbols, on "
+            "line %d",
+            parser->current_token.line);
+    goto cleanup;
+  }
+
+  // Vytvoření nového uzlu zásobníku pro neterminál E a jeho vložení na zásobník
+  push_node = create_psa_stack_node(PSA_NONTERM, NULL, NULL);
+  CHECK_MEM_ERR_GOTO(push_node, cleanup);
+  err = stack_push(stack, (void *)push_node);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
+  push_node = NULL;
+
+cleanup:
+  if (push_node != NULL) {
+    psa_stack_node_dtor(push_node);
+  }
+  for (int i = 0; i < reduce_count; i++) {
+    psa_stack_node_dtor(reduce_nodes[i]);
+  }
+  return err;
+}
+
+/**
  * @brief Zpracování výrazu pomocí precedenční analýzy
  * @param parser Parser
  * @param out_ast Výstupní AST uzel
@@ -344,28 +625,19 @@ static IFJ_ERR psa_stack_node_dtor(void *data) {
 static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
   IFJ_ERR err;
   stack_t stack;
-  token_t current_token, next_token;
-  bool expect_operand, found_handle, is_empty, found_nonterm;
+  bool expect_operand, expression_done;
   int open_parens;
   char relation;
-  token_t *token = NULL;
   psa_symbol_t stack_top_symbol, input_symbol;
   psa_stack_node_t *push_node,
-      *stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE], // Pole pro uchování
-                                                        // uzlů zásobníku při
-                                                        // redukci
       *stack_array_get_nonterm
           [STACK_TOP_ARRAY_NONTERM_SIZE]; // Pole pro uchování uzlů zásobníku
                                           // při získávání neterminálu
-  int stack_array_reduce_count = 0, stack_array_get_nonterm_count = 0;
-  void *data_out;
+  int stack_array_get_nonterm_count = 0;
 
   // Inicializace pomocných proměnných
-  current_token = parser->current_token;
-  CHECK_ERR_RET(scanner_next_token(parser->scanner, &next_token));
   expect_operand = true; // Na začátku výrazu očekáváme operand
-  // Počet otevřených závorek (pro správné zpracování konce výrazu)
-  open_parens = 0;
+  open_parens = 0; // Počet otevřených závorek
 
   // Inicializace zásobníku a vložení dolaru na dno zásobníku
   CHECK_ERR_RET(stack_init(&stack));
@@ -379,289 +651,59 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
     return err;
   }
 
+  // Hlavní smyčka precedenční analýzy
   while (1) {
     // Získání symbolu na vrcholu zásobníku, který není neterminál (E) nebo
     // zarážka (<)
     stack_array_get_nonterm_count = 0;
-    data_out = NULL;
 
-    for (int i = 0; i < STACK_TOP_ARRAY_NONTERM_SIZE; i++) {
-      err = stack_top(&stack, &data_out);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get top of stack");
+    err = get_nonterm_from_stack(&stack, stack_array_get_nonterm,
+                                 &stack_array_get_nonterm_count,
+                                 &stack_top_symbol, parser);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get non-terminal from stack");
 
-      push_node = (psa_stack_node_t *)data_out;
-
-      if (push_node->symbol != PSA_NONTERM && push_node->symbol != PSA_HANDLE) {
-        // Nalezen symbol, který není neterminál ani zarážka
-        stack_top_symbol = push_node->symbol;
-        found_nonterm = true;
-        break;
-      }
-
-      err = stack_pop(&stack, &data_out);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to pop from stack");
-
-      stack_array_get_nonterm[i] = push_node;
-      stack_array_get_nonterm_count++;
-    }
-
-    if (!found_nonterm) {
-      // Pokud nebyl nalezen symbol, který není neterminál ani zarážka, tak je
-      // to chyba
-      err = IFJ_ESYNTAX;
-      LOG_ERR(err, "Failed to find a valid symbol on the stack");
-      goto cleanup;
-    }
-
-    if (stack_array_get_nonterm_count == 1) {
-      err = stack_push(&stack, (void *)stack_array_get_nonterm[0]);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push symbol onto the stack");
-    } else if (stack_array_get_nonterm_count > 1) {
-      // Pokud bylo nalezeno více než 1 symbol, tak je to chyba
-      err = IFJ_ESYNTAX;
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Expected 1 symbol, got %d",
-                         stack_array_get_nonterm_count);
-    }
+    err = push_single_nonterm(&stack, stack_array_get_nonterm,
+                              stack_array_get_nonterm_count, parser);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to restore non-terminal on the stack");
 
     // Získání symbolu z aktuálního tokenu a vyhledání vztahu v tabulce PSA
     input_symbol =
-        token2psa_symbol(&current_token, expect_operand, open_parens);
+        token2psa_symbol(&parser->current_token, expect_operand, open_parens);
     relation = psa_table_lookup(stack_top_symbol, input_symbol);
 
     CHECK_ERR_GOTO(traverse_stack(&stack), cleanup);
 
     if (relation == '<') {
-      // Vložení zarážky (<) za neterminální symbol na zásobník
-      stack_array_get_nonterm_count = 0;
-      data_out = NULL;
-      for (int i = 0; i < STACK_TOP_ARRAY_NONTERM_SIZE; i++) {
-        err = stack_top(&stack, &data_out);
-        CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get top of stack");
-
-        push_node = (psa_stack_node_t *)data_out;
-
-        if (push_node->symbol != PSA_NONTERM &&
-            push_node->symbol != PSA_HANDLE) {
-          // Nalezen symbol, který není neterminál ani zarážka
-          stack_top_symbol = push_node->symbol;
-          found_nonterm = true;
-          break;
-        }
-
-        err = stack_pop(&stack, &data_out);
-        CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to pop from stack");
-
-        stack_array_get_nonterm[i] = push_node;
-        stack_array_get_nonterm_count++;
-      }
-
-      if (!found_nonterm) {
-        // Pokud nebyl nalezen symbol, který není neterminál ani zarážka, tak je
-        // to chyba
-        err = IFJ_ESYNTAX;
-        LOG_ERR(err, "Failed to find a valid symbol on the stack");
-        goto cleanup;
-      }
-
-      // Vyvoření zarážky (<) na zásobník
-      push_node = create_psa_stack_node(PSA_HANDLE, NULL, NULL);
-      CHECK_MEM_ERR_GOTO(push_node, cleanup);
-      err = stack_push(&stack, (void *)push_node);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push handle onto the stack");
-
-      if (stack_array_get_nonterm_count == 1) {
-        err = stack_push(&stack, (void *)stack_array_get_nonterm[0]);
-        CHECK_ERR_LOG_GOTO(err, cleanup,
-                           "Failed to push symbol onto the stack");
-      }
-
-      // Zde by se měl vytvořit AST uzel pro operand nebo operátor
-      // Pokud je to identifikátor, tak by se sem měl uložit jeho název
-
-      // Vložení symbolu z vstupu na zásobník
-      token = copy_token(&parser->current_token);
-      CHECK_MEM_ERR_GOTO(token, cleanup);
-      push_node = create_psa_stack_node(input_symbol, NULL, token);
-      CHECK_MEM_ERR_GOTO(push_node, cleanup);
-      err = stack_push(&stack, (void *)push_node);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push symbol onto the stack");
-
-      // Aktualizace počtu otevřených závoreks
-      if (input_symbol == PSA_L_PAREN) {
-        open_parens++;
-      } else if (input_symbol == PSA_R_PAREN) {
-        open_parens--;
-      }
-
-      // Aktualizace expect_operand
-      if (input_symbol == PSA_ID || input_symbol == PSA_R_PAREN) {
-        expect_operand = false; // Přečetli jsme hodnotu nebo ')', další '-'
-                                // bude binární odčítání
-      } else {
-        expect_operand = true; // Přečetli jsme operátor nebo '(', další '-'
-                               // bude unární minus
-      }
-
-      // Posun tokenů
-      err = shift_tokens(&current_token, &next_token, parser->scanner);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to shift tokens");
+      err = psa_shift(&stack, parser, input_symbol, &expect_operand,
+                      &open_parens, stack_array_get_nonterm,
+                      &stack_array_get_nonterm_count, &stack_top_symbol);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
     } else if (relation == '>') {
-      // Pravidla:
-      // E -> id (<ID)
-      // E -> (E) (<L_PAREN E R_PAREN)
-      // E -> E op E (<E op E)
-      // E -> op E (<op E)
-
-      // Získání symbolů ze zásobníku pro redukci
-      found_handle = false;
-      stack_array_reduce_count = 0;
-      data_out = NULL;
-      err = stack_is_empty(&stack, &is_empty);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to check if stack is empty");
-
-      for (int i = 0; i < STACK_TOP_ARRAY_REDUCE_SIZE && !is_empty; i++) {
-        err = stack_is_empty(&stack, &is_empty);
-        CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to check if stack is empty");
-        if (is_empty) {
-          break;
-        }
-
-        err = stack_pop(&stack, &data_out);
-        CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to pop from stack");
-
-        stack_array_reduce[i] = (psa_stack_node_t *)data_out;
-        stack_array_reduce_count++;
-
-        if (stack_array_reduce[i]->symbol == PSA_HANDLE) {
-          // Zastavení při nalezení zarážky
-          found_handle = true;
-          break;
-        }
-      }
-
-      if (!found_handle) {
-        // Pokud nebyla nalezena zarážka, zkontrolujeme, zda-li se jedná o konec
-        // výrazu
-        printf("End");
-        if (input_symbol == PSA_DOLLAR &&
-            stack_array_reduce_count == STACK_TOP_ARRAY_REDUCE_SIZE - 2 &&
-            stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE - 1]->symbol ==
-                PSA_NONTERM &&
-            stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE - 2]->symbol ==
-                PSA_DOLLAR) {
-          // Konec výrazu, úspěšně jsme zpracovali celý výraz
-          break;
-        }
-
-        err = IFJ_ESYNTAX;
-        LOG_ERR(err, "Failed to find a handle symbol on the stack");
-        goto cleanup;
-      }
-
-      if (stack_array_reduce[0]->symbol == PSA_ID) {
-        // Redukce E -> id
-        // Vytvoření AST uzlu pro identifikátor
-        // ast_node_t *id_node;
-        // CHECK_ERR_GOTO(ast_create_node(&id_node, AST_EXPR), cleanup);
-        // stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE - 1]->ast_node =
-        // id_node;
-        printf("Redukce E -> id\n");
-      } else if (stack_array_reduce_count == 4 &&
-                 stack_array_reduce[0]->symbol == PSA_R_PAREN &&
-                 stack_array_reduce[1]->symbol == PSA_NONTERM &&
-                 stack_array_reduce[2]->symbol == PSA_L_PAREN) {
-        // Redukce E -> (E)
-        // Vytvoření AST uzlu pro závorky
-        // ast_node_t *paren_node;
-        // CHECK_ERR_GOTO(ast_create_node(&paren_node, AST_EXPR), cleanup);
-        // stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE - 2]->ast_node =
-        // paren_node;
-        printf("Redukce E -> (E)\n");
-      } else if (stack_array_reduce_count == 4 &&
-                 stack_array_reduce[0]->symbol == PSA_NONTERM &&
-                 (stack_array_reduce[1]->symbol == PSA_ADD_SUB ||
-                  stack_array_reduce[1]->symbol == PSA_MUL_DIV ||
-                  stack_array_reduce[1]->symbol == PSA_DOT ||
-                  stack_array_reduce[1]->symbol == PSA_EQ_OP ||
-                  stack_array_reduce[1]->symbol == PSA_REL_OP ||
-                  stack_array_reduce[1]->symbol == PSA_AND_OP ||
-                  stack_array_reduce[1]->symbol == PSA_OR_OP) &&
-                 stack_array_reduce[2]->symbol == PSA_NONTERM) {
-        // Redukce E -> E op E
-        // Vytvoření AST uzlu pro binární operaci
-        // ast_node_t *bin_op_node;
-        // CHECK_ERR_GOTO(ast_create_node(&bin_op_node, AST_EXPR), cleanup);
-        // stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE - 3]->ast_node =
-        // bin_op_node;
-        printf("Redukce E -> E op E\n");
-      } else if (stack_array_reduce_count == 3 &&
-                 stack_array_reduce[0]->symbol == PSA_NONTERM &&
-                 stack_array_reduce[1]->symbol == PSA_UNARY) {
-        // Redukce E -> op E
-        // Vytvoření AST uzlu pro unární operaci
-        // ast_node_t *unary_op_node;
-        // CHECK_ERR_GOTO(ast_create_node(&unary_op_node, AST_EXPR), cleanup);
-        // stack_array_reduce[STACK_TOP_ARRAY_REDUCE_SIZE - 4]->ast_node =
-        // unary_op_node;
-        printf("Redukce E -> op E\n");
-      } else {
-        err = IFJ_ESYNTAX;
-        LOG_ERR(err, "Failed to match a reduction rule for the stack symbols");
-        goto cleanup;
-      }
-
-      // Vložení neterminálu E na zásobník
-      push_node = create_psa_stack_node(PSA_NONTERM, NULL, NULL);
-      CHECK_MEM_ERR_GOTO(push_node, cleanup);
-      err = stack_push(&stack, (void *)push_node);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
-
-      // Uvolnění uzlů zásobníku, které byly použity pro redukci
-      for (int i = 0; i < stack_array_reduce_count; i++) {
-        psa_stack_node_dtor(stack_array_reduce[i]);
+      err = psa_reduce(&stack, parser, input_symbol, &expression_done);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to reduce expression");
+      if (expression_done) {
+        break;
       }
     } else if (relation == '=') {
-      // Vložení symbolu z vstupu na zásobník
-      token = copy_token(&parser->current_token);
-      CHECK_MEM_ERR_GOTO(token, cleanup);
-      push_node = create_psa_stack_node(input_symbol, NULL, token);
-      CHECK_MEM_ERR_GOTO(push_node, cleanup);
-      err = stack_push(&stack, (void *)push_node);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
-
-      // Aktualizace počtu otevřených závoreks
-      if (input_symbol == PSA_L_PAREN) {
-        open_parens++;
-      } else if (input_symbol == PSA_R_PAREN) {
-        open_parens--;
-      }
-
-      // Aktualizace expect_operand
-      if (input_symbol == PSA_ID || input_symbol == PSA_R_PAREN) {
-        expect_operand = false; // Přečetli jsme hodnotu nebo ')', další '-'
-                                // bude binární odčítání
-      } else {
-        expect_operand = true; // Přečetli jsme operátor nebo '(', další '-'
-                               // bude unární minus
-      }
-
-      // Posun tokenů
-      err = shift_tokens(&current_token, &next_token, parser->scanner);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to shift tokens");
+      err = psa_equal(&stack, parser, input_symbol, &expect_operand,
+                      &open_parens);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
     } else if (relation == 'f') {
       // Syntaktická chyba
       err = IFJ_ESYNTAX;
-      LOG_ERR(err, "Syntax error");
+      LOG_ERR(err, "Syntax error, on line %d", parser->current_token.line);
       goto cleanup;
     } else if (relation == 'e') {
       // Konec výrazu
-      err = IFJ_SUCCESS;
-      goto cleanup;
+      stack_deep_dtor(&stack, psa_stack_node_dtor);
+      return IFJ_SUCCESS;
     }
   }
 
 cleanup:
   /*dodelat*/
+  // ast_destroy(*out_ast); // musi dodelat ondi jinak to bude memory leak
   stack_deep_dtor(&stack, psa_stack_node_dtor);
   return err;
 }
