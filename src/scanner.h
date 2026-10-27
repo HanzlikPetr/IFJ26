@@ -88,6 +88,7 @@ typedef enum {
 
   TOK_INDENT, // začátek odsazení
   TOK_DEDENT, // konec odsazení
+  TOK_NULL, // literál ()
 } token_type_t;
 
 /**
