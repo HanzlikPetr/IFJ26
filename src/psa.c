@@ -319,6 +319,22 @@ static IFJ_ERR traverse_stack(stack_t *stack) {
   return IFJ_SUCCESS;
 }
 
+static IFJ_ERR psa_stack_node_dtor(void *data) {
+  psa_stack_node_t *node = data;
+
+  if (node == NULL) {
+    return IFJ_EINTERNAL;
+  }
+
+  if (node->token != NULL) {
+    token_free(node->token);
+    free(node->token);
+  }
+
+  free(node);
+  return IFJ_SUCCESS;
+}
+
 /**
  * @brief Zpracování výrazu pomocí precedenční analýzy
  * @param parser Parser
@@ -600,6 +616,10 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
       err = stack_push(&stack, (void *)push_node);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
 
+      // Uvolnění uzlů zásobníku, které byly použity pro redukci
+      for (int i = 0; i < stack_array_reduce_count; i++) {
+        psa_stack_node_dtor(stack_array_reduce[i]);
+      }
     } else if (relation == '=') {
       // Vložení symbolu z vstupu na zásobník
       token = copy_token(&parser->current_token);
@@ -635,14 +655,14 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
       goto cleanup;
     } else if (relation == 'e') {
       // Konec výrazu
-      break;
+      err = IFJ_SUCCESS;
+      goto cleanup;
     }
   }
 
-  return IFJ_SUCCESS;
-  
 cleanup:
   /*dodelat*/
+  stack_deep_dtor(&stack, psa_stack_node_dtor);
   return err;
 }
 
