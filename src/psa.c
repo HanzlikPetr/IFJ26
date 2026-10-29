@@ -8,7 +8,6 @@
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
 
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -280,13 +279,22 @@ static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR push_single_nonterm(stack_t *stack, psa_stack_node_t *nodes[],
-                                   int node_count, parser_t *parser) {
+/**
+ * @brief Vrátí terminál na vrcholu zásobníku.
+ * @param stack Zásobník PSA.
+ * @param nodes Pole uzlů zásobníku.
+ * @param node_count Počet uzlů v poli nodes.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
+                                int node_count, parser_t *parser) {
   CHECK_ARGS_NULL_RET(stack, nodes, parser);
+  IFJ_ERR err;
 
   if (node_count == 1) {
-    CHECK_ERR_LOG_RET(stack_push(stack, (void *)nodes[0]),
-                      "Failed to push symbol onto the stack");
+    err = stack_push(stack, (void *)nodes[0]);
+    CHECK_ERR_LOG_RET(err, "Failed to push symbol onto the stack");
   } else if (node_count > 1) {
     LOG_ERR(IFJ_ESYNTAX, "Expected 1 symbol, got %d, on line %d", node_count,
             parser->current_token.line);
@@ -360,8 +368,8 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
   err = stack_push(stack, (void *)push_node);
   CHECK_ERR_LOG_RET(err, "Failed to push handle onto the stack");
 
-  err = push_single_nonterm(stack, stack_array_get_nonterm,
-                            *stack_array_get_nonterm_count, parser);
+  err = push_single_term(stack, stack_array_get_nonterm,
+                         *stack_array_get_nonterm_count, parser);
   CHECK_ERR_LOG_RET(err, "Failed to restore non-terminal on the stack");
 
   token = copy_token(&parser->current_token);
@@ -429,6 +437,14 @@ static IFJ_ERR psa_equal(stack_t *stack, parser_t *parser,
   return scanner_next_token(parser->scanner, &parser->current_token);
 }
 
+/**
+ * @brief Zpracuje redukci v precedenční analýze.
+ * @param stack Zásobník PSA.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @param stack_array_reduce Pole pro uchování uzlů zásobníku při redukci.
+ * @param stack_array_reduce_count Počet uzlů v poli stack_array_reduce.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
 static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
   CHECK_ARGS_NULL_RET(token, out_ast);
 
@@ -480,6 +496,12 @@ static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Vytvoří AST uzel pro proměnnou.
+ * @param token Token obsahující identifikátor proměnné.
+ * @param out_ast Ukazatel na vytvořený AST uzel.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
 static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
   CHECK_ARGS_NULL_RET(token, out_ast);
 
@@ -765,6 +787,30 @@ static IFJ_ERR get_input_symbol(parser_t *parser, bool expect_operand,
 }
 
 /**
+ * @brief Inicializuje AST uzel pro volání funkce.
+ * @param func_call_ast AST uzel, který se má inicializovat.
+ */
+static void init_func_call_ast(ast_node_t *func_call_ast) {
+  func_call_ast->type = AST_FUNC_CALL;
+  func_call_ast->as.func_call.param_lists = NULL;
+  func_call_ast->as.func_call.param_lists_cnt = 0;
+  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
+  func_call_ast->inferred_type.is_list = false;
+}
+
+/**
+ * @brief Inicializuje AST uzel seznamu parametrů.
+ * @param param_list_ast AST uzel seznamu parametrů.
+ */
+static void init_param_list_ast(ast_node_t *param_list_ast) {
+  param_list_ast->type = AST_PARAM_LIST;
+  param_list_ast->as.param_list.params = NULL;
+  param_list_ast->as.param_list.params_cnt = 0;
+  param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
+  param_list_ast->inferred_type.is_list = false;
+}
+
+/**
  * @brief Parsování volání funkce
  * @param parser Parser
  * @param out_ast Výstupní AST uzel
@@ -951,8 +997,8 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
                                  &stack_top_symbol, parser);
     CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get non-terminal from stack");
 
-    err = push_single_nonterm(&stack, stack_array_get_nonterm,
-                              stack_array_get_nonterm_count, parser);
+    err = push_single_term(&stack, stack_array_get_nonterm,
+                           stack_array_get_nonterm_count, parser);
     CHECK_ERR_LOG_GOTO(err, cleanup,
                        "Failed to restore non-terminal on the stack");
 
