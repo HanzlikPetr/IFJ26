@@ -779,13 +779,7 @@ static IFJ_ERR parse_function_call(parser_t *parser, ast_node_t **out_ast) {
   // Vytvoření AST uzlu pro volání funkce
   func_call_ast = malloc(sizeof *func_call_ast);
   CHECK_MEM_ERR(func_call_ast);
-
-  // Nastavení typu AST uzlu a kopírování identifikátoru funkce
-  func_call_ast->type = AST_FUNC_CALL;
-  func_call_ast->as.func_call.param_lists = NULL;
-  func_call_ast->as.func_call.param_lists_cnt = 0;
-  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
-  func_call_ast->inferred_type.is_list = false;
+  init_func_call_ast(func_call_ast);
 
   // Zkopírování identifikátoru funkce z aktuálního tokenu nebo nastavení na
   // "List" pokud je to klíčové slovo list
@@ -810,11 +804,7 @@ static IFJ_ERR parse_function_call(parser_t *parser, ast_node_t **out_ast) {
     // Vytvoření seznamu parametrů
     param_list_ast = malloc(sizeof *param_list_ast);
     CHECK_MEM_ERR_GOTO(param_list_ast, cleanup);
-    param_list_ast->type = AST_PARAM_LIST;
-    param_list_ast->as.param_list.params = NULL;
-    param_list_ast->as.param_list.params_cnt = 0;
-    param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
-    param_list_ast->inferred_type.is_list = false;
+    init_param_list_ast(param_list_ast);
 
     // Naplnění seznamu parametrů volání funkce
     while (parser->current_token.type != TOK_RPAREN) {
@@ -924,10 +914,6 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
 
   // Hlavní smyčka precedenční analýzy
   while (1) {
-    // Získání symbolu na vrcholu zásobníku, který není neterminál (E) nebo
-    // zarážka (<)
-    // CHECK_ERR_GOTO(traverse_stack(&stack), cleanup);
-
     if (parser->current_token.type == TOK_ID ||
         (parser->current_token.type == TOK_KEYWORD &&
          parser->current_token.value.keyword == KW_LIST)) {
@@ -952,10 +938,12 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
         push_node = NULL;
         func_call_ast = NULL; // Předání vlastnictví AST uzlu do zásobníku
         continue; // Přeskočíme zbytek smyčky, protože jsme již zpracovali
-                  // volání funkce
+        // volání funkce
       }
     }
 
+    // Získání symbolu na vrcholu zásobníku, který není neterminál (E) nebo
+    // zarážka (<)
     stack_array_get_nonterm_count = 0;
 
     err = get_nonterm_from_stack(&stack, stack_array_get_nonterm,
