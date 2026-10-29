@@ -68,9 +68,9 @@ struct ast_node {
      * foo(1, 2), add(x)(y)).
      */
     struct {
-      ast_node_t *callee; /**< Volaný výraz */
-      ast_node_t **args;  /**< Pole argumentů (výrazů) v závorce */
-      size_t args_cnt;    /**< Počet argumentů */
+      char *id; /**< Název funkce */
+      ast_node_t **param_lists;  /**< Pole seznamů parametrů */
+      size_t param_lists_cnt;    /**< Počet seznamů parametrů */
     } func_call;
 
     struct {
@@ -197,7 +197,25 @@ IFJ_ERR ast_create_node(ast_node_t **node, ast_node_type_t type);
 IFJ_ERR ast_root_add_func(ast_node_t *root, ast_node_t *func);
 IFJ_ERR ast_block_add_command(ast_node_t *block, ast_node_t *command);
 IFJ_ERR ast_func_add_param_list(ast_node_t *func, ast_node_t *param_list);
+
+/**
+ * @brief Přidá seznam argumentů do volání funkce.
+ * @param func_call AST uzel volání funkce.
+ * @param param_list AST uzel seznamu argumentů.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+IFJ_ERR ast_func_call_add_param_list(ast_node_t *func_call,
+                                     ast_node_t *param_list);
 IFJ_ERR ast_param_list_add_param(ast_node_t *param_list, ast_node_t *param);
+
+/**
+ * @brief Přidá argument do seznamu argumentů volání funkce.
+ * @param param_list AST uzel seznamu argumentů.
+ * @param arg AST uzel argumentu.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+IFJ_ERR ast_func_call_param_list_add_arg(ast_node_t *param_list,
+                                         ast_node_t *arg);
 IFJ_ERR ast_if_add_else_if(ast_node_t *if_st, ast_node_t *else_if_st);
 IFJ_ERR ast_for_add_guard(ast_node_t *for_st, ast_node_t *guard);
 
