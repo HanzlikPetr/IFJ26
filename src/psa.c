@@ -280,97 +280,6 @@ static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR traverse_stack(stack_t *stack) {
-  CHECK_ARG_NULL_RET(stack);
-
-  psa_stack_node_t **nodes = NULL;
-  size_t count = 0;
-  size_t capacity = 0;
-  void *data_out;
-
-  while (true) {
-    bool is_empty;
-    CHECK_ERR_RET(stack_is_empty(stack, &is_empty));
-    if (is_empty) {
-      break;
-    }
-
-    CHECK_ERR_RET(stack_pop(stack, &data_out));
-    if (count == capacity) {
-      size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
-      psa_stack_node_t **new_nodes =
-          realloc(nodes, new_capacity * sizeof *new_nodes);
-      if (new_nodes == NULL) {
-        for (size_t i = count; i > 0; --i) {
-          CHECK_ERR_RET(stack_push(stack, nodes[i - 1]));
-        }
-        free(nodes);
-        return IFJ_EINTERNAL;
-      }
-      nodes = new_nodes;
-      capacity = new_capacity;
-    }
-    nodes[count++] = (psa_stack_node_t *)data_out;
-  }
-
-  for (size_t i = count; i > 0; --i) {
-    psa_stack_node_t *node = nodes[i - 1];
-    switch (node->symbol) {
-    case PSA_EQ_OP:
-      printf("PSA_EQ_OP ");
-      break;
-    case PSA_AND_OP:
-      printf("PSA_AND_OP ");
-      break;
-    case PSA_OR_OP:
-      printf("PSA_OR_OP ");
-      break;
-    case PSA_L_PAREN:
-      printf("( ");
-      break;
-    case PSA_R_PAREN:
-      printf(") ");
-      break;
-    case PSA_DOLLAR:
-      printf("$ ");
-      break;
-    case PSA_ID:
-      printf("PSA_ID ");
-      break;
-    case PSA_NONTERM:
-      printf("E ");
-      break;
-    case PSA_HANDLE:
-      printf("< ");
-      break;
-    case PSA_ADD_SUB:
-      printf("PSA_ADD_SUB ");
-      break;
-    case PSA_MUL_DIV:
-      printf("PSA_MUL_DIV ");
-      break;
-    case PSA_REL_OP:
-      printf("PSA_REL_OP ");
-      break;
-    case PSA_UNARY:
-      printf("PSA_UNARY ");
-      break;
-    case PSA_DOT:
-      printf("PSA_DOT ");
-      break;
-    default:
-      printf("Unknown symbol: %d", node->symbol);
-    }
-  }
-
-  for (size_t i = count; i > 0; --i) {
-    CHECK_ERR_RET(stack_push(stack, nodes[i - 1]));
-  }
-  free(nodes);
-  printf("\n");
-  return IFJ_SUCCESS;
-}
-
 static IFJ_ERR push_single_nonterm(stack_t *stack, psa_stack_node_t *nodes[],
                                    int node_count, parser_t *parser) {
   CHECK_ARGS_NULL_RET(stack, nodes, parser);
@@ -564,6 +473,9 @@ static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
     return IFJ_ESYNTAX;
   }
 
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
   *out_ast = new_ast_node;
   return IFJ_SUCCESS;
 }
@@ -571,7 +483,12 @@ static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
 static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
   CHECK_ARGS_NULL_RET(token, out_ast);
 
-  if (token->type != TOK_ID) {
+  if (token->type != TOK_ID &&
+      (token->type == TOK_KEYWORD && token->value.keyword != KW_LIST)) {
+    LOG_ERR(
+        IFJ_ESYNTAX,
+        "Expected identifier or 'list' keyword, got token type %d on line %d",
+        token->type, token->line);
     return IFJ_ESYNTAX;
   }
 
@@ -579,8 +496,16 @@ static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
   CHECK_MEM_ERR(new_ast_node);
 
   new_ast_node->type = AST_VAR;
-  new_ast_node->as.var.id = strdup(token->value.str_value);
-  CHECK_MEM_ERR(new_ast_node->as.var.id);
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
+  if (token->type == TOK_ID) {
+    new_ast_node->as.var.id = strdup(token->value.str_value);
+    CHECK_MEM_ERR(new_ast_node->as.var.id);
+  } else {
+    new_ast_node->as.var.id = strdup("List");
+    CHECK_MEM_ERR(new_ast_node->as.var.id);
+  }
 
   *out_ast = new_ast_node;
   return IFJ_SUCCESS;
@@ -606,6 +531,8 @@ static IFJ_ERR create_ast_binary_expr(token_t *operator_token, ast_node_t **lhs,
   new_ast_node->as.expr.operator_type = operator_token->type;
   new_ast_node->as.expr.binary.lhs = *lhs;
   new_ast_node->as.expr.binary.rhs = *rhs;
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
 
   // Předání vlastnictví AST uzlů a nastavení původních ukazatelů na NULL
   *lhs = NULL;
@@ -634,6 +561,8 @@ static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
   new_ast_node->as.expr.is_unary = true;
   new_ast_node->as.expr.operator_type = operator_token->type;
   new_ast_node->as.expr.unary.operand = *operand;
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
 
   // Předání vlastnictví AST uzlu a nastavení původního ukazatele na NULL
   *operand = NULL;
@@ -725,6 +654,10 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
         err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
         CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to create AST literal from token");
+      } else if (reduce_nodes[0]->token->value.keyword == KW_LIST) {
+        err = create_ast_var(reduce_nodes[0]->token, &new_ast_node);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to create AST variable from token");
       } else {
         err = IFJ_ESYNTAX;
         LOG_ERR(err, "Invalid keyword for E -> id reduction, on line %d",
@@ -776,8 +709,6 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
 
   // Vytvoření nového uzlu zásobníku pro neterminál E, včetně vytovřené části
   // ast, a jeho vložení na zásobník
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
   push_node = create_psa_stack_node(PSA_NONTERM, new_ast_node, NULL);
   CHECK_MEM_ERR_GOTO(push_node, cleanup);
   err = stack_push(stack, (void *)push_node);
@@ -834,6 +765,128 @@ static IFJ_ERR get_input_symbol(parser_t *parser, bool expect_operand,
 }
 
 /**
+ * @brief Parsování volání funkce
+ * @param parser Parser
+ * @param out_ast Výstupní AST uzel
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód
+ */
+static IFJ_ERR parse_function_call(parser_t *parser, ast_node_t **out_ast) {
+  ast_node_t *func_call_ast = NULL, *param_ast = NULL, *param_list_ast = NULL;
+  IFJ_ERR err;
+
+  CHECK_ARGS_NULL_RET(parser, out_ast);
+
+  // Vytvoření AST uzlu pro volání funkce
+  func_call_ast = malloc(sizeof *func_call_ast);
+  CHECK_MEM_ERR(func_call_ast);
+
+  // Nastavení typu AST uzlu a kopírování identifikátoru funkce
+  func_call_ast->type = AST_FUNC_CALL;
+  func_call_ast->as.func_call.param_lists = NULL;
+  func_call_ast->as.func_call.param_lists_cnt = 0;
+  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
+  func_call_ast->inferred_type.is_list = false;
+
+  // Zkopírování identifikátoru funkce z aktuálního tokenu nebo nastavení na
+  // "List" pokud je to klíčové slovo list
+  if (parser->current_token.type == TOK_ID) {
+    func_call_ast->as.func_call.id =
+        strdup(parser->current_token.value.str_value);
+    CHECK_MEM_ERR(func_call_ast->as.func_call.id);
+  } else {
+    func_call_ast->as.func_call.id = strdup("List");
+    CHECK_MEM_ERR(func_call_ast->as.func_call.id);
+  }
+
+  // Načtení dalšího tokenu po identifikátoru funkce
+  err = scanner_next_token(parser->scanner, &parser->current_token);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+  while (parser->current_token.type == TOK_LPAREN) {
+    // Přeskočení levé závorky
+    err = scanner_next_token(parser->scanner, &parser->current_token);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+    // Vytvoření seznamu parametrů
+    param_list_ast = malloc(sizeof *param_list_ast);
+    CHECK_MEM_ERR_GOTO(param_list_ast, cleanup);
+    param_list_ast->type = AST_PARAM_LIST;
+    param_list_ast->as.param_list.params = NULL;
+    param_list_ast->as.param_list.params_cnt = 0;
+    param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
+    param_list_ast->inferred_type.is_list = false;
+
+    // Naplnění seznamu parametrů volání funkce
+    while (parser->current_token.type != TOK_RPAREN) {
+      // Vytvoření AST uzlu pro parametr
+      err = psa_parse_expression(parser, &param_ast);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to parse function call parameter");
+
+      // Přidání parametru do seznamu parametrů
+      err = ast_func_call_param_list_add_arg(param_list_ast, param_ast);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to add parameter to parameter list");
+      param_ast = NULL; // Předání vlastnictví param_ast do seznamu
+
+      // Přeskočení čárky, pokud existuje
+      if (parser->current_token.type == TOK_COMMA) {
+        err = scanner_next_token(parser->scanner, &parser->current_token);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to get next token from scanner");
+      } else if (parser->current_token.type != TOK_RPAREN) {
+        LOG_ERR(IFJ_ESYNTAX,
+                "Expected ',' or ')' in function call parameters, got token "
+                "type %d on line %d",
+                parser->current_token.type, parser->current_token.line);
+        err = IFJ_ESYNTAX;
+        goto cleanup;
+      }
+    }
+
+    if (parser->current_token.type == TOK_RPAREN) {
+      // Přeskočení pravé závorky
+      err = scanner_next_token(parser->scanner, &parser->current_token);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+    } else {
+      LOG_ERR(IFJ_ESYNTAX,
+              "Expected ')' after function call parameters, got token type %d "
+              "on line %d",
+              parser->current_token.type, parser->current_token.line);
+      err = IFJ_ESYNTAX;
+      goto cleanup;
+    }
+
+    // Přidání seznamu parametrů do volání funkce
+    err = ast_func_call_add_param_list(func_call_ast, param_list_ast);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to add parameter list to function call");
+
+    param_list_ast =
+        NULL; // Předání vlastnictví param_list_ast do func_call_ast
+  }
+
+  *out_ast = func_call_ast;
+  func_call_ast = NULL; // Předání vlastnictví func_call_ast do out_ast
+  return IFJ_SUCCESS;
+
+cleanup:
+  if (func_call_ast != NULL) {
+    ast_free(func_call_ast);
+    free(func_call_ast);
+  }
+  if (param_ast != NULL) {
+    ast_free(param_ast);
+    free(param_ast);
+  }
+  if (param_list_ast != NULL) {
+    ast_free(param_list_ast);
+    free(param_list_ast);
+  }
+  return err;
+}
+
+/**
  * @brief Zpracování výrazu pomocí precedenční analýzy
  * @param parser Parser
  * @param out_ast Výstupní AST uzel
@@ -873,6 +926,36 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
   while (1) {
     // Získání symbolu na vrcholu zásobníku, který není neterminál (E) nebo
     // zarážka (<)
+    // CHECK_ERR_GOTO(traverse_stack(&stack), cleanup);
+
+    if (parser->current_token.type == TOK_ID ||
+        (parser->current_token.type == TOK_KEYWORD &&
+         parser->current_token.value.keyword == KW_LIST)) {
+      token_t token_peek;
+      err = scanner_peek_next_token(parser->scanner, &token_peek);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to peek next token from scanner");
+
+      if (token_peek.type == TOK_LPAREN) {
+        // Pokud je aktuální token ID a následující token je LPAREN, tak se
+        // jedná o volání funkce
+        ast_node_t *func_call_ast = NULL;
+        err = parse_function_call(parser, &func_call_ast);
+        CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to parse function call");
+
+        // Vytvoření uzlu zásobníku pro volání funkce
+        push_node = create_psa_stack_node(PSA_NONTERM, func_call_ast, NULL);
+        CHECK_MEM_ERR_GOTO(push_node, cleanup);
+        err = stack_push(&stack, (void *)push_node);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to push function call onto stack");
+        push_node = NULL;
+        func_call_ast = NULL; // Předání vlastnictví AST uzlu do zásobníku
+        continue; // Přeskočíme zbytek smyčky, protože jsme již zpracovali
+                  // volání funkce
+      }
+    }
+
     stack_array_get_nonterm_count = 0;
 
     err = get_nonterm_from_stack(&stack, stack_array_get_nonterm,
@@ -889,8 +972,6 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
     err = get_input_symbol(parser, expect_operand, open_parens, &input_symbol);
     CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get input symbol");
     relation = psa_table_lookup(stack_top_symbol, input_symbol);
-
-    CHECK_ERR_GOTO(traverse_stack(&stack), cleanup);
 
     if (relation == '<') {
       err = psa_shift(&stack, parser, input_symbol, &expect_operand,
