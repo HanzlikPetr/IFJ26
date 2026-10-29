@@ -56,6 +56,18 @@ IFJ_ERR ast_func_add_param_list(ast_node_t *func, ast_node_t *param_list) {
                           &func->as.func.param_lists_cnt, param_list);
 }
 
+IFJ_ERR ast_func_call_add_param_list(ast_node_t *func_call,
+                                     ast_node_t *param_list) {
+  CHECK_ARGS_NULL_RET(func_call, param_list);
+
+  if (param_list->type != AST_PARAM_LIST || func_call->type != AST_FUNC_CALL) {
+    return IFJ_EINTERNAL;
+  }
+
+  return ast_array_append(&func_call->as.func_call.param_lists,
+                          &func_call->as.func_call.param_lists_cnt, param_list);
+}
+
 IFJ_ERR ast_param_list_add_param(ast_node_t *param_list, ast_node_t *param) {
   CHECK_ARG_NULL_RET(param);
   CHECK_ARG_NULL_RET(param_list);
@@ -66,6 +78,18 @@ IFJ_ERR ast_param_list_add_param(ast_node_t *param_list, ast_node_t *param) {
 
   return ast_array_append(&param_list->as.param_list.params,
                           &param_list->as.param_list.params_cnt, param);
+}
+
+IFJ_ERR ast_func_call_param_list_add_arg(ast_node_t *param_list,
+                                         ast_node_t *arg) {
+  CHECK_ARGS_NULL_RET(param_list, arg);
+
+  if (param_list->type != AST_PARAM_LIST) {
+    return IFJ_EINTERNAL;
+  }
+
+  return ast_array_append(&param_list->as.param_list.params,
+                          &param_list->as.param_list.params_cnt, arg);
 }
 
 IFJ_ERR ast_block_add_command(ast_node_t *block, ast_node_t *command) {
@@ -224,12 +248,12 @@ void ast_free(ast_node_t *root) {
     }
     break;
 
-  case AST_CALL:
-    ast_free(root->as.call.callee);
-    for (size_t i = 0; i < root->as.call.args_cnt; i++) {
-      ast_free(root->as.call.args[i]);
+  case AST_FUNC_CALL:
+    free(root->as.func_call.id);
+    for (size_t i = 0; i < root->as.func_call.param_lists_cnt; i++) {
+      ast_free(root->as.func_call.param_lists[i]);
     }
-    free(root->as.call.args);
+    free(root->as.func_call.param_lists);
     break;
 
   default:
