@@ -34,6 +34,7 @@ typedef enum {
   PSA_UNARY,   // unarní operátory '!' nebo '-'
   PSA_MUL_DIV, // '*' nebo '/'
   PSA_ADD_SUB, // '+', '-' nebo '++' (konkatenace)
+  PSA_RANGE, // 'to', 'until'
   PSA_REL_OP,  // '<', '>', '<=', '>='
   PSA_EQ_OP,   // '==' nebo '!='
   PSA_AND_OP,  // '&&'
@@ -67,21 +68,22 @@ typedef struct psa_stack_node {
  * 'f' - syntaktická chyba
  * 'e' - konec výrazu
  */
-char psa_table[12][12] = {
-    // DOT | UNARY | MUL_DIV | ADD_SUB | REL_OP | EQ_OP | AND_OP | OR_OP |
-    // L_PAREN | R_PAREN | ID | DOLLAR
-    {'>', 'f', '>', '>', '>', '>', '>', '>', 'f', '>', '<', '>'}, // DOT
-    {'<', '<', '>', '>', '>', '>', '>', '>', '<', '>', '<', '>'}, // UNARY
-    {'<', '<', '>', '>', '>', '>', '>', '>', '<', '>', '<', '>'}, // MUL_DIV
-    {'<', '<', '<', '>', '>', '>', '>', '>', '<', '>', '<', '>'}, // ADD_SUB
-    {'<', '<', '<', '<', 'f', '>', '>', '>', '<', '>', '<', '>'}, // REL_OP
-    {'<', '<', '<', '<', '<', 'f', '>', '>', '<', '>', '<', '>'}, // EQ_OP
-    {'<', '<', '<', '<', '<', '<', '>', '>', '<', '>', '<', '>'}, // AND_OP
-    {'<', '<', '<', '<', '<', '<', '<', '>', '<', '>', '<', '>'}, // OR_OP
-    {'<', '<', '<', '<', '<', '<', '<', '<', '<', '=', '<', 'f'}, // L_PAREN
-    {'>', 'f', '>', '>', '>', '>', '>', '>', 'f', '>', 'f', '>'}, // R_PAREN
-    {'>', 'f', '>', '>', '>', '>', '>', '>', 'f', '>', 'f', '>'}, // ID
-    {'<', '<', '<', '<', '<', '<', '<', '<', '<', 'f', '<', 'e'}, // DOLLAR
+static const char psa_table[13][13] = {
+    // DOT | UNARY | MUL_DIV | ADD_SUB | RANGE |REL_OP | EQ_OP | AND_OP |
+    // OR_OP | L_PAREN | R_PAREN | ID | DOLLAR
+    {'>', 'f', '>', '>', '>', '>', '>', '>', '>', 'f', '>', '<', '>'}, // DOT
+    {'<', '<', '>', '>', '>', '>', '>', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '>', '>', '>', '>', '>', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '>', '>', '>', '>', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '<', 'f', '>', '>', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '<', '<', 'f', '>', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '<', '<', '<', 'f', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '<', '<', '<', '<', '>', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '<', '<', '<', '<', '<', '>', '<', '>', '<', '>'},
+    {'<', '<', '<', '<', '<', '<', '<', '<', '<', '<', '=', '<', 'f'},
+    {'>', 'f', '>', '>', '>', '>', '>', '>', '>', 'f', '>', 'f', '>'},
+    {'>', 'f', '>', '>', '>', '>', '>', '>', '>', 'f', '>', 'f', '>'},
+    {'<', '<', '<', '<', '<', '<', '<', '<', '<', '<', 'f', '<', 'e'},
 };
 
 /**
@@ -140,10 +142,17 @@ static psa_symbol_t token2psa_symbol(token_t *token, bool expect_operand,
     // Pokud neni otevrena zavorka, tak výraz je ukončen
     return open_parens > 0 ? PSA_R_PAREN : PSA_DOLLAR;
 
+  case TOK_ID:
+    if (strcmp("to", token->value.str_value) == 0 ||
+        strcmp("until", token->value.str_value) == 0) {
+      return open_parens > 0 ? PSA_RANGE : PSA_DOLLAR;
+    } else {
+      return PSA_ID;
+    }
+
   case TOK_INT:
   case TOK_FLOAT:
   case TOK_STRING:
-  case TOK_ID:
   case TOK_NULL:
     return PSA_ID;
   case TOK_KEYWORD:
@@ -178,8 +187,9 @@ static char psa_table_lookup(psa_symbol_t stack_top, psa_symbol_t input) {
  * @param token Token odpovídající symbolu
  * @return Ukazatel na nově vytvořený uzel zásobníku nebo NULL v případě chyby
  */
-psa_stack_node_t *create_psa_stack_node(psa_symbol_t symbol,
-                                        ast_node_t *ast_node, token_t *token) {
+static psa_stack_node_t *create_psa_stack_node(psa_symbol_t symbol,
+                                               ast_node_t *ast_node,
+                                               token_t *token) {
   psa_stack_node_t *node = malloc(sizeof(psa_stack_node_t));
   if (node == NULL) {
     return NULL; // Chyba alokace paměti
@@ -280,31 +290,6 @@ static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
 }
 
 /**
- * @brief Vrátí terminál na vrcholu zásobníku.
- * @param stack Zásobník PSA.
- * @param nodes Pole uzlů zásobníku.
- * @param node_count Počet uzlů v poli nodes.
- * @param parser Parser používaný pro diagnostiku chyb.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
-                                int node_count, parser_t *parser) {
-  CHECK_ARGS_NULL_RET(stack, nodes, parser);
-  IFJ_ERR err;
-
-  if (node_count == 1) {
-    err = stack_push(stack, (void *)nodes[0]);
-    CHECK_ERR_LOG_RET(err, "Failed to push symbol onto the stack");
-  } else if (node_count > 1) {
-    LOG_ERR(IFJ_ESYNTAX, "Expected 1 symbol, got %d, on line %d", node_count,
-            parser->current_token.line);
-    return IFJ_ESYNTAX;
-  }
-
-  return IFJ_SUCCESS;
-}
-
-/**
  * @brief Uvolní uzel zásobníku PSA.
  * @param data Ukazatel na uzel zásobníku PSA.
  * @return IFJ_SUCCESS při úspěšném uvolnění nebo IFJ_EINTERNAL při chybě.
@@ -330,6 +315,407 @@ static IFJ_ERR psa_stack_node_dtor(void *data) {
 }
 
 /**
+ * @brief Vrátí terminál na vrcholu zásobníku.
+ * @param stack Zásobník PSA.
+ * @param nodes Pole uzlů zásobníku.
+ * @param node_count Počet uzlů v poli nodes.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
+                                int node_count, parser_t *parser) {
+  CHECK_ARGS_NULL_RET(stack, nodes, parser);
+  IFJ_ERR err;
+
+  if (node_count == 1) {
+    err = stack_push(stack, (void *)nodes[0]);
+    CHECK_ERR_LOG_RET(err, "Failed to push symbol onto the stack");
+  } else if (node_count > 1) {
+    for (int i = 0; i < node_count; i++) {
+      psa_stack_node_dtor(nodes[i]);
+    }
+    CHECK_ERR_LOG_RET(IFJ_ESYNTAX, "Expected 1 symbol, got %d, on line %d",
+                      node_count, parser->current_token.line);
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Zpracuje redukci v precedenční analýze.
+ * @param stack Zásobník PSA.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @param stack_array_reduce Pole pro uchování uzlů zásobníku při redukci.
+ * @param stack_array_reduce_count Počet uzlů v poli stack_array_reduce.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
+  CHECK_ARGS_NULL_RET(token, out_ast);
+
+  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
+  CHECK_MEM_ERR(new_ast_node);
+
+  new_ast_node->type = AST_LITERAL;
+
+  switch (token->type) {
+  case TOK_INT:
+    new_ast_node->as.literal.type = TYPE_INT;
+    new_ast_node->as.literal.int_value = token->value.int_value;
+    break;
+
+  case TOK_FLOAT:
+    new_ast_node->as.literal.type = TYPE_DOUBLE;
+    new_ast_node->as.literal.double_value = token->value.double_value;
+    break;
+
+  case TOK_STRING:
+    new_ast_node->as.literal.type = TYPE_STRING;
+    new_ast_node->as.literal.str_value = strdup(token->value.str_value);
+    if (!new_ast_node->as.literal.str_value) {
+      free(new_ast_node);
+      return IFJ_EINTERNAL;
+    }
+    break;
+
+  case TOK_NULL:
+    new_ast_node->as.literal.type = TYPE_UNIT;
+    break;
+
+  case TOK_KEYWORD:
+    if (token->value.keyword == KW_TRUE || token->value.keyword == KW_FALSE) {
+      new_ast_node->as.literal.type = TYPE_BOOL;
+      new_ast_node->as.literal.bool_value = (token->value.keyword == KW_TRUE);
+    } else {
+      free(new_ast_node);
+      return IFJ_ESYNTAX;
+    }
+    break;
+
+  default:
+    free(new_ast_node);
+    return IFJ_ESYNTAX;
+  }
+
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+  new_ast_node->as.literal.is_folded = false;
+
+  *out_ast = new_ast_node;
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Vytvoří AST uzel pro proměnnou.
+ * @param token Token obsahující identifikátor proměnné.
+ * @param out_ast Ukazatel na vytvořený AST uzel.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
+  CHECK_ARGS_NULL_RET(token, out_ast);
+
+  if (token->type != TOK_ID &&
+      (token->type == TOK_KEYWORD && token->value.keyword != KW_LIST)) {
+    LOG_ERR(
+        IFJ_ESYNTAX,
+        "Expected identifier or 'list' keyword, got token type %d on line %d",
+        token->type, token->line);
+    return IFJ_ESYNTAX;
+  }
+
+  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
+  CHECK_MEM_ERR(new_ast_node);
+
+  new_ast_node->type = AST_VAR;
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
+  if (token->type == TOK_ID) {
+    new_ast_node->as.var.id = strdup(token->value.str_value);
+    if (!new_ast_node->as.var.id) {
+      free(new_ast_node);
+      return IFJ_EINTERNAL;
+    }
+  } else {
+    new_ast_node->as.var.id = strdup("List");
+    if (!new_ast_node->as.var.id) {
+      free(new_ast_node);
+      return IFJ_EINTERNAL;
+    }
+  }
+
+  *out_ast = new_ast_node;
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Vytvoří AST uzel pro binární výraz.
+ * @param operator_token Token binárního operátoru.
+ * @param lhs Levý operand.
+ * @param rhs Pravý operand.
+ * @param out_ast Ukazatel na vytvořený AST uzel.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR create_ast_binary_expr(token_t *operator_token, ast_node_t **lhs,
+                                      ast_node_t **rhs, ast_node_t **out_ast) {
+  CHECK_ARGS_NULL_RET(operator_token, lhs, rhs, out_ast);
+
+  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
+  CHECK_MEM_ERR(new_ast_node);
+
+  if (operator_token->type == TOK_ID) {
+    if (strcmp("to", operator_token->value.str_value) == 0) {
+      new_ast_node->as.expr.operator_type = TOK_TO;
+    } else if (strcmp("until", operator_token->value.str_value) == 0) {
+      new_ast_node->as.expr.operator_type = TOK_UNTIL;
+    } else {
+      free(new_ast_node);
+      return IFJ_ESYNTAX;
+    }
+  } else {
+    new_ast_node->as.expr.operator_type = operator_token->type;
+  }
+
+  new_ast_node->type = AST_EXPR;
+  new_ast_node->as.expr.is_unary = false;
+  new_ast_node->as.expr.binary.lhs = *lhs;
+  new_ast_node->as.expr.binary.rhs = *rhs;
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
+  // Předání vlastnictví AST uzlů a nastavení původních ukazatelů na NULL
+  *lhs = NULL;
+  *rhs = NULL;
+
+  *out_ast = new_ast_node;
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Vytvoří AST uzel pro unární výraz.
+ * @param operator_token Token unárního operátoru.
+ * @param operand Operand unárního výrazu.
+ * @param out_ast Ukazatel na vytvořený AST uzel.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
+                                     ast_node_t **operand,
+                                     ast_node_t **out_ast) {
+  CHECK_ARGS_NULL_RET(operator_token, operand, out_ast);
+
+  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
+  CHECK_MEM_ERR(new_ast_node);
+  
+  new_ast_node->type = AST_EXPR;
+  new_ast_node->as.expr.is_unary = true;
+  new_ast_node->as.expr.operator_type = operator_token->type;
+  new_ast_node->as.expr.unary.operand = *operand;
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
+  // Předání vlastnictví AST uzlu a nastavení původního ukazatele na NULL
+  *operand = NULL;
+
+  *out_ast = new_ast_node;
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Inicializuje AST uzel pro volání funkce.
+ * @param func_call_ast AST uzel, který se má inicializovat.
+ */
+static void init_func_call_ast(ast_node_t *func_call_ast) {
+  func_call_ast->type = AST_FUNC_CALL;
+  func_call_ast->as.func_call.param_lists = NULL;
+  func_call_ast->as.func_call.param_lists_cnt = 0;
+  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
+  func_call_ast->inferred_type.is_list = false;
+}
+
+/**
+ * @brief Inicializuje AST uzel seznamu parametrů.
+ * @param param_list_ast AST uzel seznamu parametrů.
+ */
+static void init_param_list_ast(ast_node_t *param_list_ast) {
+  param_list_ast->type = AST_PARAM_LIST;
+  param_list_ast->as.param_list.params = NULL;
+  param_list_ast->as.param_list.params_cnt = 0;
+  param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
+  param_list_ast->inferred_type.is_list = false;
+}
+
+/**
+ * @brief Získá symbol aktuálního vstupního tokenu pro PSA.
+ * @param parser Parser.
+ * @param expect_operand True pokud se očekává operand.
+ * @param open_parens Počet otevřených závorek.
+ * @param input_symbol Výstupní symbol vstupu.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR get_input_symbol(parser_t *parser, bool expect_operand,
+                                int open_parens, psa_symbol_t *input_symbol) {
+  token_t peek_token;
+  IFJ_ERR err;
+
+  CHECK_ARGS_NULL_RET(parser, input_symbol);
+
+  if (expect_operand && parser->current_token.type == TOK_LPAREN) {
+    err = scanner_peek_next_token(parser->scanner, &peek_token);
+    CHECK_ERR_RET(err);
+
+    if (peek_token.type == TOK_RPAREN) {
+      *input_symbol = PSA_ID;
+
+      // Odstranění ')' z aktuálního tokenu
+      err = scanner_next_token(parser->scanner, &peek_token);
+      CHECK_ERR_RET(err);
+
+      parser->current_token.line = peek_token.line;
+      parser->current_token.type = TOK_NULL;
+    } else {
+      *input_symbol =
+          token2psa_symbol(&parser->current_token, expect_operand, open_parens);
+    }
+  } else {
+    *input_symbol =
+        token2psa_symbol(&parser->current_token, expect_operand, open_parens);
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Parsování volání funkce
+ * @param parser Parser
+ * @param out_ast Výstupní AST uzel
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód
+ */
+static IFJ_ERR parse_function_call(parser_t *parser, ast_node_t **out_ast) {
+  ast_node_t *func_call_ast = NULL, *param_ast = NULL, *param_list_ast = NULL;
+  IFJ_ERR err;
+  int comma_line = -1;
+
+  CHECK_ARGS_NULL_RET(parser, out_ast);
+
+  // Vytvoření AST uzlu pro volání funkce
+  func_call_ast = malloc(sizeof *func_call_ast);
+  CHECK_MEM_ERR(func_call_ast);
+  init_func_call_ast(func_call_ast);
+
+  // Zkopírování identifikátoru funkce z aktuálního tokenu nebo nastavení na
+  // "List" pokud je to klíčové slovo list
+  if (parser->current_token.type == TOK_ID) {
+    func_call_ast->as.func_call.id =
+        strdup(parser->current_token.value.str_value);
+    if (!func_call_ast->as.func_call.id) {
+      free(func_call_ast);
+      return IFJ_EINTERNAL;
+    }
+  } else {
+    func_call_ast->as.func_call.id = strdup("List");
+    if (!func_call_ast->as.func_call.id) {
+      free(func_call_ast);
+      return IFJ_EINTERNAL;
+    }
+  }
+
+  // Načtení dalšího tokenu po identifikátoru funkce
+  token_free(&parser->current_token);
+  err = scanner_next_token(parser->scanner, &parser->current_token);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+  while (parser->current_token.type == TOK_LPAREN) {
+    comma_line = -1; // Resetování čísla řádku čárky
+
+    // Přeskočení levé závorky
+    token_free(&parser->current_token);
+    err = scanner_next_token(parser->scanner, &parser->current_token);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+    // Vytvoření seznamu parametrů
+    param_list_ast = malloc(sizeof *param_list_ast);
+    CHECK_MEM_ERR_GOTO(param_list_ast, cleanup);
+    init_param_list_ast(param_list_ast);
+
+    // Naplnění seznamu parametrů volání funkce
+    while (parser->current_token.type != TOK_RPAREN) {
+      comma_line = -1; // Resetování čísla řádku čárky
+
+      // Vytvoření AST uzlu pro parametr
+      err = psa_parse_expression(parser, &param_ast);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to parse function call parameter");
+
+      // Přidání parametru do seznamu parametrů
+      err = ast_func_call_param_list_add_arg(param_list_ast, param_ast);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to add parameter to parameter list");
+      param_ast = NULL; // Předání vlastnictví param_ast do seznamu
+
+      // Přeskočení čárky, pokud existuje
+      if (parser->current_token.type == TOK_COMMA) {
+        comma_line = parser->current_token.line;
+        token_free(&parser->current_token);
+        err = scanner_next_token(parser->scanner, &parser->current_token);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to get next token from scanner");
+      } else if (parser->current_token.type != TOK_RPAREN) {
+        err = IFJ_ESYNTAX;
+        CHECK_ERR_LOG_GOTO(
+            err, cleanup,
+            "Expected ',' or ')' in function call parameters, got token "
+            "type %d on line %d",
+            parser->current_token.type, parser->current_token.line);
+      }
+    }
+
+    if (parser->current_token.type == TOK_RPAREN) {
+      if (comma_line == parser->current_token.line) {
+        err = IFJ_ESYNTAX;
+        CHECK_ERR_LOG_GOTO(
+            err, cleanup,
+            "Trailing comma in function call parameters on line %d",
+            parser->current_token.line);
+      }
+      // Přeskočení pravé závorky
+      token_free(&parser->current_token);
+      err = scanner_next_token(parser->scanner, &parser->current_token);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+    } else {
+      err = IFJ_ESYNTAX;
+      CHECK_ERR_LOG_GOTO(
+          err, cleanup,
+          "Expected ')' after function call parameters, got token type %d "
+          "on line %d",
+          parser->current_token.type, parser->current_token.line);
+    }
+
+    // Přidání seznamu parametrů do volání funkce
+    err = ast_func_call_add_param_list(func_call_ast, param_list_ast);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to add parameter list to function call");
+
+    param_list_ast =
+        NULL; // Předání vlastnictví param_list_ast do func_call_ast
+  }
+
+  *out_ast = func_call_ast;
+  func_call_ast = NULL; // Předání vlastnictví func_call_ast do out_ast
+  return IFJ_SUCCESS;
+
+cleanup:
+  if (func_call_ast != NULL) {
+    ast_free(func_call_ast);
+  }
+  if (param_ast != NULL) {
+    ast_free(param_ast);
+  }
+  if (param_list_ast != NULL) {
+    ast_free(param_list_ast);
+  }
+  return err;
+}
+
+/**
  * @brief Zpracuje posun (shift) v precedenční analýze
  * @param stack Zásobník PSA
  * @param parser Parser používaný pro načtení dalšího tokenu
@@ -351,12 +737,40 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
                          int *stack_array_get_nonterm_count,
                          psa_symbol_t *stack_top_symbol) {
   IFJ_ERR err;
-  token_t *token;
+  token_t *token, token_peek;
   psa_stack_node_t *push_node;
+  ast_node_t *func_call_ast = NULL;
 
   CHECK_ARGS_NULL_RET(stack, parser, expect_operand, open_parens,
                       stack_array_get_nonterm, stack_array_get_nonterm_count,
                       stack_top_symbol);
+
+  // Kontrola, zda se jedná o volání funkce nebo o LIST (klíčové slovo)
+  if (parser->current_token.type == TOK_ID ||
+      (parser->current_token.type == TOK_KEYWORD &&
+       parser->current_token.value.keyword == KW_LIST)) {
+    err = scanner_peek_next_token(parser->scanner, &token_peek);
+    CHECK_ERR_LOG_RET(err, "Failed to peek next token from scanner");
+
+    if (token_peek.type == TOK_LPAREN) {
+      // Pokud je aktuální token ID a následující token je LPAREN, tak se
+      // jedná o volání funkce
+      err = parse_function_call(parser, &func_call_ast);
+      CHECK_ERR_LOG_RET(err, "Failed to parse function call");
+
+      // Vytvoření uzlu zásobníku pro volání funkce
+      push_node = create_psa_stack_node(PSA_NONTERM, func_call_ast, NULL);
+      if (!push_node) {
+        ast_free(func_call_ast);
+        return IFJ_EINTERNAL;
+      }
+      err = stack_push(stack, (void *)push_node);
+      CHECK_ERR_LOG_RET(err, "Failed to push function call onto stack");
+
+      *expect_operand = false;
+      return IFJ_SUCCESS;
+    }
+  }
 
   err = get_nonterm_from_stack(stack, stack_array_get_nonterm,
                                stack_array_get_nonterm_count, stack_top_symbol,
@@ -364,16 +778,22 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
   CHECK_ERR_LOG_RET(err, "Failed to get non-terminal from stack");
 
   push_node = create_psa_stack_node(PSA_HANDLE, NULL, NULL);
-  CHECK_MEM_ERR(push_node);
+  if (!push_node) {
+    token_free(&parser->current_token);
+    return IFJ_EINTERNAL;
+  }
   err = stack_push(stack, (void *)push_node);
   CHECK_ERR_LOG_RET(err, "Failed to push handle onto the stack");
 
   err = push_single_term(stack, stack_array_get_nonterm,
                          *stack_array_get_nonterm_count, parser);
-  CHECK_ERR_LOG_RET(err, "Failed to restore non-terminal on the stack");
+  CHECK_ERR_LOG_RET(err, "Failed to restore terminal on the stack");
 
   token = copy_token(&parser->current_token);
-  CHECK_MEM_ERR(token);
+  if (!token) {
+    token_free(&parser->current_token);
+    return IFJ_EINTERNAL;
+  }
   push_node = create_psa_stack_node(input_symbol, NULL, token);
   CHECK_MEM_ERR(push_node);
   err = stack_push(stack, (void *)push_node);
@@ -389,6 +809,159 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
 
   token_free(&parser->current_token);
   return scanner_next_token(parser->scanner, &parser->current_token);
+}
+
+/**
+ * @brief Redukuje handle na neterminál E.
+ * @param stack Zásobník PSA.
+ * @param parser Parser používaný pro diagnostiku chyb.
+ * @param expression_done Nastaví se na true při úspěšném ukončení výrazu.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
+                          bool *expression_done) {
+  IFJ_ERR err = IFJ_SUCCESS;
+  bool found_handle = false;
+  bool is_empty;
+  void *data_out = NULL;
+  int reduce_count = 0;
+  psa_stack_node_t *reduce_nodes[STACK_TOP_ARRAY_REDUCE_SIZE];
+  psa_stack_node_t *push_node = NULL;
+  ast_node_t *new_ast_node = NULL;
+
+  CHECK_ARGS_NULL_RET(stack, parser, expression_done);
+  *expression_done = false;
+
+  err = stack_is_empty(stack, &is_empty);
+  CHECK_ERR_LOG_RET(err, "Failed to check if stack is empty");
+
+  for (int i = 0; i < STACK_TOP_ARRAY_REDUCE_SIZE && !is_empty; i++) {
+    err = stack_is_empty(stack, &is_empty);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to check if stack is empty");
+    if (is_empty) {
+      break;
+    }
+
+    err = stack_pop(stack, &data_out);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to pop from stack");
+    reduce_nodes[reduce_count++] = (psa_stack_node_t *)data_out;
+
+    if (reduce_nodes[reduce_count - 1]->symbol == PSA_HANDLE) {
+      found_handle = true;
+      break;
+    }
+  }
+
+  // Pokud nebyla nalezena zarážka, zkontrolujeme, zda-li se jedná o konec
+  // výrazu
+  if (!found_handle) {
+    if (reduce_nodes[0]->symbol == PSA_DOLLAR &&
+        reduce_nodes[1]->symbol == PSA_NONTERM &&
+        reduce_nodes[2]->symbol == PSA_DOLLAR) {
+      *expression_done = true;
+      goto cleanup;
+    }
+
+    err = IFJ_ESYNTAX;
+    LOG_ERR(err, "Failed to find a handle symbol on the stack, on line %d",
+            parser->current_token.line);
+    goto cleanup;
+  }
+
+  if (reduce_count == 2 && reduce_nodes[0]->symbol == PSA_ID) {
+    // Pravidlo 1: E -> id
+    switch (reduce_nodes[0]->token->type) {
+    case TOK_ID:
+      err = create_ast_var(reduce_nodes[0]->token, &new_ast_node);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to create AST variable from token");
+      break;
+
+    case TOK_INT:
+    case TOK_FLOAT:
+    case TOK_STRING:
+    case TOK_NULL:
+      err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to create AST literal from token");
+      break;
+
+    case TOK_KEYWORD:
+      if (reduce_nodes[0]->token->value.keyword == KW_TRUE ||
+          reduce_nodes[0]->token->value.keyword == KW_FALSE) {
+        err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to create AST literal from token");
+      } else if (reduce_nodes[0]->token->value.keyword == KW_LIST) {
+        err = create_ast_var(reduce_nodes[0]->token, &new_ast_node);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to create AST variable from token");
+      } else {
+        err = IFJ_ESYNTAX;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Invalid keyword for E -> id reduction, on line %d",
+                           parser->current_token.line);
+      }
+      break;
+
+    default:
+      err = IFJ_ESYNTAX;
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Invalid token type for E -> id reduction, on line %d",
+                         parser->current_token.line);
+    }
+  } else if (reduce_count == 4 && reduce_nodes[0]->symbol == PSA_R_PAREN &&
+             reduce_nodes[1]->symbol == PSA_NONTERM &&
+             reduce_nodes[2]->symbol == PSA_L_PAREN) {
+    // Pravidlo 2: E -> (E)
+    new_ast_node = reduce_nodes[1]->ast_node;
+    reduce_nodes[1]->ast_node = NULL; // Předejme vlastnictví AST uzlu
+  } else if (reduce_count == 4 && reduce_nodes[0]->symbol == PSA_NONTERM &&
+             (reduce_nodes[1]->symbol == PSA_ADD_SUB ||
+              reduce_nodes[1]->symbol == PSA_MUL_DIV ||
+              reduce_nodes[1]->symbol == PSA_DOT ||
+              reduce_nodes[1]->symbol == PSA_EQ_OP ||
+              reduce_nodes[1]->symbol == PSA_REL_OP ||
+              reduce_nodes[1]->symbol == PSA_AND_OP ||
+              reduce_nodes[1]->symbol == PSA_OR_OP ||
+              reduce_nodes[1]->symbol == PSA_RANGE) &&
+             reduce_nodes[2]->symbol == PSA_NONTERM) {
+    // Pravidlo 3: E -> E op E
+    err = create_ast_binary_expr(reduce_nodes[1]->token,
+                                 &reduce_nodes[2]->ast_node,
+                                 &reduce_nodes[0]->ast_node, &new_ast_node);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to create AST binary expression");
+  } else if (reduce_count == 3 && reduce_nodes[0]->symbol == PSA_NONTERM &&
+             reduce_nodes[1]->symbol == PSA_UNARY) {
+    // Pravidlo 4: E -> op E
+    err = create_ast_unary_expr(reduce_nodes[1]->token,
+                                &reduce_nodes[0]->ast_node, &new_ast_node);
+    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to create AST unary expression");
+  } else {
+    err = IFJ_ESYNTAX;
+    LOG_ERR(err,
+            "Failed to match a reduction rule for the stack symbols, on "
+            "line %d",
+            parser->current_token.line);
+    goto cleanup;
+  }
+
+  // Vytvoření nového uzlu zásobníku pro neterminál E, včetně vytovřené části
+  // ast, a jeho vložení na zásobník
+  push_node = create_psa_stack_node(PSA_NONTERM, new_ast_node, NULL);
+  CHECK_MEM_ERR_GOTO(push_node, cleanup);
+  err = stack_push(stack, (void *)push_node);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
+  push_node = NULL;
+
+cleanup:
+  if (push_node != NULL) {
+    psa_stack_node_dtor(push_node);
+  }
+  for (int i = 0; i < reduce_count; i++) {
+    psa_stack_node_dtor(reduce_nodes[i]);
+  }
+  return err;
 }
 
 /**
@@ -438,491 +1011,6 @@ static IFJ_ERR psa_equal(stack_t *stack, parser_t *parser,
 }
 
 /**
- * @brief Zpracuje redukci v precedenční analýze.
- * @param stack Zásobník PSA.
- * @param parser Parser používaný pro diagnostiku chyb.
- * @param stack_array_reduce Pole pro uchování uzlů zásobníku při redukci.
- * @param stack_array_reduce_count Počet uzlů v poli stack_array_reduce.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
-  CHECK_ARGS_NULL_RET(token, out_ast);
-
-  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
-  CHECK_MEM_ERR(new_ast_node);
-
-  new_ast_node->type = AST_LITERAL;
-
-  switch (token->type) {
-  case TOK_INT:
-    new_ast_node->as.literal.type = TYPE_INT;
-    new_ast_node->as.literal.int_value = token->value.int_value;
-    break;
-
-  case TOK_FLOAT:
-    new_ast_node->as.literal.type = TYPE_DOUBLE;
-    new_ast_node->as.literal.double_value = token->value.double_value;
-    break;
-
-  case TOK_STRING:
-    new_ast_node->as.literal.type = TYPE_STRING;
-    new_ast_node->as.literal.str_value = strdup(token->value.str_value);
-    CHECK_MEM_ERR(new_ast_node->as.literal.str_value);
-    break;
-
-  case TOK_NULL:
-    new_ast_node->as.literal.type = TYPE_UNIT;
-    break;
-
-  case TOK_KEYWORD:
-    if (token->value.keyword == KW_TRUE || token->value.keyword == KW_FALSE) {
-      new_ast_node->as.literal.type = TYPE_BOOL;
-      new_ast_node->as.literal.bool_value = (token->value.keyword == KW_TRUE);
-    } else {
-      free(new_ast_node);
-      return IFJ_ESYNTAX;
-    }
-    break;
-
-  default:
-    free(new_ast_node);
-    return IFJ_ESYNTAX;
-  }
-
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
-
-  *out_ast = new_ast_node;
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Vytvoří AST uzel pro proměnnou.
- * @param token Token obsahující identifikátor proměnné.
- * @param out_ast Ukazatel na vytvořený AST uzel.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
-  CHECK_ARGS_NULL_RET(token, out_ast);
-
-  if (token->type != TOK_ID &&
-      (token->type == TOK_KEYWORD && token->value.keyword != KW_LIST)) {
-    LOG_ERR(
-        IFJ_ESYNTAX,
-        "Expected identifier or 'list' keyword, got token type %d on line %d",
-        token->type, token->line);
-    return IFJ_ESYNTAX;
-  }
-
-  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
-  CHECK_MEM_ERR(new_ast_node);
-
-  new_ast_node->type = AST_VAR;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
-
-  if (token->type == TOK_ID) {
-    new_ast_node->as.var.id = strdup(token->value.str_value);
-    CHECK_MEM_ERR(new_ast_node->as.var.id);
-  } else {
-    new_ast_node->as.var.id = strdup("List");
-    CHECK_MEM_ERR(new_ast_node->as.var.id);
-  }
-
-  *out_ast = new_ast_node;
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Vytvoří AST uzel pro binární výraz.
- * @param operator_token Token binárního operátoru.
- * @param lhs Levý operand.
- * @param rhs Pravý operand.
- * @param out_ast Ukazatel na vytvořený AST uzel.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR create_ast_binary_expr(token_t *operator_token, ast_node_t **lhs,
-                                      ast_node_t **rhs, ast_node_t **out_ast) {
-  CHECK_ARGS_NULL_RET(operator_token, lhs, rhs, out_ast);
-
-  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
-  CHECK_MEM_ERR(new_ast_node);
-
-  new_ast_node->type = AST_EXPR;
-  new_ast_node->as.expr.is_unary = false;
-  new_ast_node->as.expr.operator_type = operator_token->type;
-  new_ast_node->as.expr.binary.lhs = *lhs;
-  new_ast_node->as.expr.binary.rhs = *rhs;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
-
-  // Předání vlastnictví AST uzlů a nastavení původních ukazatelů na NULL
-  *lhs = NULL;
-  *rhs = NULL;
-
-  *out_ast = new_ast_node;
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Vytvoří AST uzel pro unární výraz.
- * @param operator_token Token unárního operátoru.
- * @param operand Operand unárního výrazu.
- * @param out_ast Ukazatel na vytvořený AST uzel.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
-                                     ast_node_t **operand,
-                                     ast_node_t **out_ast) {
-  CHECK_ARGS_NULL_RET(operator_token, operand, out_ast);
-
-  ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
-  CHECK_MEM_ERR(new_ast_node);
-
-  new_ast_node->type = AST_EXPR;
-  new_ast_node->as.expr.is_unary = true;
-  new_ast_node->as.expr.operator_type = operator_token->type;
-  new_ast_node->as.expr.unary.operand = *operand;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
-
-  // Předání vlastnictví AST uzlu a nastavení původního ukazatele na NULL
-  *operand = NULL;
-
-  *out_ast = new_ast_node;
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Redukuje handle na neterminál E.
- * @param stack Zásobník PSA.
- * @param parser Parser používaný pro diagnostiku chyb.
- * @param input_symbol Aktuální vstupní symbol.
- * @param expression_done Nastaví se na true při úspěšném ukončení výrazu.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
-                          psa_symbol_t input_symbol, bool *expression_done) {
-  IFJ_ERR err = IFJ_SUCCESS;
-  bool found_handle = false;
-  bool is_empty;
-  void *data_out = NULL;
-  int reduce_count = 0;
-  psa_stack_node_t *reduce_nodes[STACK_TOP_ARRAY_REDUCE_SIZE];
-  psa_stack_node_t *push_node = NULL;
-  ast_node_t *new_ast_node = NULL;
-
-  CHECK_ARGS_NULL_RET(stack, parser, expression_done);
-  *expression_done = false;
-
-  err = stack_is_empty(stack, &is_empty);
-  CHECK_ERR_LOG_RET(err, "Failed to check if stack is empty");
-
-  for (int i = 0; i < STACK_TOP_ARRAY_REDUCE_SIZE && !is_empty; i++) {
-    err = stack_is_empty(stack, &is_empty);
-    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to check if stack is empty");
-    if (is_empty) {
-      break;
-    }
-
-    err = stack_pop(stack, &data_out);
-    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to pop from stack");
-    reduce_nodes[reduce_count++] = (psa_stack_node_t *)data_out;
-
-    if (reduce_nodes[reduce_count - 1]->symbol == PSA_HANDLE) {
-      found_handle = true;
-      break;
-    }
-  }
-
-  // Pokud nebyla nalezena zarážka, zkontrolujeme, zda-li se jedná o konec
-  // výrazu
-  if (!found_handle) {
-    if (input_symbol == PSA_DOLLAR && reduce_count == 3 &&
-        reduce_nodes[0]->symbol == PSA_DOLLAR &&
-        reduce_nodes[1]->symbol == PSA_NONTERM &&
-        reduce_nodes[2]->symbol == PSA_DOLLAR) {
-      *expression_done = true;
-      goto cleanup;
-    }
-
-    err = IFJ_ESYNTAX;
-    LOG_ERR(err, "Failed to find a handle symbol on the stack, on line %d",
-            parser->current_token.line);
-    goto cleanup;
-  }
-
-  if (reduce_nodes[0]->symbol == PSA_ID) {
-    // Pravidlo 1: E -> id
-    switch (reduce_nodes[0]->token->type) {
-    case TOK_ID:
-      err = create_ast_var(reduce_nodes[0]->token, &new_ast_node);
-      CHECK_ERR_LOG_GOTO(err, cleanup,
-                         "Failed to create AST variable from token");
-      break;
-
-    case TOK_INT:
-    case TOK_FLOAT:
-    case TOK_STRING:
-    case TOK_NULL:
-      err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
-      CHECK_ERR_LOG_GOTO(err, cleanup,
-                         "Failed to create AST literal from token");
-      break;
-
-    case TOK_KEYWORD:
-      if (reduce_nodes[0]->token->value.keyword == KW_TRUE ||
-          reduce_nodes[0]->token->value.keyword == KW_FALSE) {
-        err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
-        CHECK_ERR_LOG_GOTO(err, cleanup,
-                           "Failed to create AST literal from token");
-      } else if (reduce_nodes[0]->token->value.keyword == KW_LIST) {
-        err = create_ast_var(reduce_nodes[0]->token, &new_ast_node);
-        CHECK_ERR_LOG_GOTO(err, cleanup,
-                           "Failed to create AST variable from token");
-      } else {
-        err = IFJ_ESYNTAX;
-        LOG_ERR(err, "Invalid keyword for E -> id reduction, on line %d",
-                parser->current_token.line);
-        goto cleanup;
-      }
-      break;
-
-    default:
-      err = IFJ_ESYNTAX;
-      LOG_ERR(err, "Invalid token type for E -> id reduction, on line %d",
-              parser->current_token.line);
-      goto cleanup;
-    }
-  } else if (reduce_count == 4 && reduce_nodes[0]->symbol == PSA_R_PAREN &&
-             reduce_nodes[1]->symbol == PSA_NONTERM &&
-             reduce_nodes[2]->symbol == PSA_L_PAREN) {
-    // Pravidlo 2: E -> (E)
-    new_ast_node = reduce_nodes[1]->ast_node;
-    reduce_nodes[1]->ast_node = NULL; // Předejme vlastnictví AST uzlu
-  } else if (reduce_count == 4 && reduce_nodes[0]->symbol == PSA_NONTERM &&
-             (reduce_nodes[1]->symbol == PSA_ADD_SUB ||
-              reduce_nodes[1]->symbol == PSA_MUL_DIV ||
-              reduce_nodes[1]->symbol == PSA_DOT ||
-              reduce_nodes[1]->symbol == PSA_EQ_OP ||
-              reduce_nodes[1]->symbol == PSA_REL_OP ||
-              reduce_nodes[1]->symbol == PSA_AND_OP ||
-              reduce_nodes[1]->symbol == PSA_OR_OP) &&
-             reduce_nodes[2]->symbol == PSA_NONTERM) {
-    // Pravidlo 3: E -> E op E
-    err = create_ast_binary_expr(reduce_nodes[1]->token,
-                                 &reduce_nodes[2]->ast_node,
-                                 &reduce_nodes[0]->ast_node, &new_ast_node);
-    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to create AST binary expression");
-  } else if (reduce_count == 3 && reduce_nodes[0]->symbol == PSA_NONTERM &&
-             reduce_nodes[1]->symbol == PSA_UNARY) {
-    // Pravidlo 4: E -> op E
-    err = create_ast_unary_expr(reduce_nodes[1]->token,
-                                &reduce_nodes[0]->ast_node, &new_ast_node);
-    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to create AST unary expression");
-  } else {
-    err = IFJ_ESYNTAX;
-    LOG_ERR(err,
-            "Failed to match a reduction rule for the stack symbols, on "
-            "line %d",
-            parser->current_token.line);
-    goto cleanup;
-  }
-
-  // Vytvoření nového uzlu zásobníku pro neterminál E, včetně vytovřené části
-  // ast, a jeho vložení na zásobník
-  push_node = create_psa_stack_node(PSA_NONTERM, new_ast_node, NULL);
-  CHECK_MEM_ERR_GOTO(push_node, cleanup);
-  err = stack_push(stack, (void *)push_node);
-  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
-  push_node = NULL;
-
-cleanup:
-  if (push_node != NULL) {
-    psa_stack_node_dtor(push_node);
-  }
-  for (int i = 0; i < reduce_count; i++) {
-    psa_stack_node_dtor(reduce_nodes[i]);
-  }
-  return err;
-}
-
-/**
- * @brief Získá symbol aktuálního vstupního tokenu pro PSA.
- * @param parser Parser.
- * @param expect_operand True pokud se očekává operand.
- * @param open_parens Počet otevřených závorek.
- * @param input_symbol Výstupní symbol vstupu.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR get_input_symbol(parser_t *parser, bool expect_operand,
-                                int open_parens, psa_symbol_t *input_symbol) {
-  token_t peek_token;
-  IFJ_ERR err;
-
-  CHECK_ARGS_NULL_RET(parser, input_symbol);
-
-  if (parser->current_token.type == TOK_LPAREN) {
-    err = scanner_peek_next_token(parser->scanner, &peek_token);
-    CHECK_ERR_RET(err);
-
-    if (peek_token.type == TOK_RPAREN) {
-      *input_symbol = PSA_ID;
-
-      err = scanner_peek_next_token(parser->scanner, &peek_token);
-      CHECK_ERR_RET(err);
-
-      parser->current_token.line = peek_token.line;
-      parser->current_token.type = TOK_NULL;
-    } else {
-      *input_symbol =
-          token2psa_symbol(&parser->current_token, expect_operand, open_parens);
-    }
-  } else {
-    *input_symbol =
-        token2psa_symbol(&parser->current_token, expect_operand, open_parens);
-  }
-
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Inicializuje AST uzel pro volání funkce.
- * @param func_call_ast AST uzel, který se má inicializovat.
- */
-static void init_func_call_ast(ast_node_t *func_call_ast) {
-  func_call_ast->type = AST_FUNC_CALL;
-  func_call_ast->as.func_call.param_lists = NULL;
-  func_call_ast->as.func_call.param_lists_cnt = 0;
-  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
-  func_call_ast->inferred_type.is_list = false;
-}
-
-/**
- * @brief Inicializuje AST uzel seznamu parametrů.
- * @param param_list_ast AST uzel seznamu parametrů.
- */
-static void init_param_list_ast(ast_node_t *param_list_ast) {
-  param_list_ast->type = AST_PARAM_LIST;
-  param_list_ast->as.param_list.params = NULL;
-  param_list_ast->as.param_list.params_cnt = 0;
-  param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
-  param_list_ast->inferred_type.is_list = false;
-}
-
-/**
- * @brief Parsování volání funkce
- * @param parser Parser
- * @param out_ast Výstupní AST uzel
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód
- */
-static IFJ_ERR parse_function_call(parser_t *parser, ast_node_t **out_ast) {
-  ast_node_t *func_call_ast = NULL, *param_ast = NULL, *param_list_ast = NULL;
-  IFJ_ERR err;
-
-  CHECK_ARGS_NULL_RET(parser, out_ast);
-
-  // Vytvoření AST uzlu pro volání funkce
-  func_call_ast = malloc(sizeof *func_call_ast);
-  CHECK_MEM_ERR(func_call_ast);
-  init_func_call_ast(func_call_ast);
-
-  // Zkopírování identifikátoru funkce z aktuálního tokenu nebo nastavení na
-  // "List" pokud je to klíčové slovo list
-  if (parser->current_token.type == TOK_ID) {
-    func_call_ast->as.func_call.id =
-        strdup(parser->current_token.value.str_value);
-    CHECK_MEM_ERR(func_call_ast->as.func_call.id);
-  } else {
-    func_call_ast->as.func_call.id = strdup("List");
-    CHECK_MEM_ERR(func_call_ast->as.func_call.id);
-  }
-
-  // Načtení dalšího tokenu po identifikátoru funkce
-  err = scanner_next_token(parser->scanner, &parser->current_token);
-  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
-
-  while (parser->current_token.type == TOK_LPAREN) {
-    // Přeskočení levé závorky
-    err = scanner_next_token(parser->scanner, &parser->current_token);
-    CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
-
-    // Vytvoření seznamu parametrů
-    param_list_ast = malloc(sizeof *param_list_ast);
-    CHECK_MEM_ERR_GOTO(param_list_ast, cleanup);
-    init_param_list_ast(param_list_ast);
-
-    // Naplnění seznamu parametrů volání funkce
-    while (parser->current_token.type != TOK_RPAREN) {
-      // Vytvoření AST uzlu pro parametr
-      err = psa_parse_expression(parser, &param_ast);
-      CHECK_ERR_LOG_GOTO(err, cleanup,
-                         "Failed to parse function call parameter");
-
-      // Přidání parametru do seznamu parametrů
-      err = ast_func_call_param_list_add_arg(param_list_ast, param_ast);
-      CHECK_ERR_LOG_GOTO(err, cleanup,
-                         "Failed to add parameter to parameter list");
-      param_ast = NULL; // Předání vlastnictví param_ast do seznamu
-
-      // Přeskočení čárky, pokud existuje
-      if (parser->current_token.type == TOK_COMMA) {
-        err = scanner_next_token(parser->scanner, &parser->current_token);
-        CHECK_ERR_LOG_GOTO(err, cleanup,
-                           "Failed to get next token from scanner");
-      } else if (parser->current_token.type != TOK_RPAREN) {
-        LOG_ERR(IFJ_ESYNTAX,
-                "Expected ',' or ')' in function call parameters, got token "
-                "type %d on line %d",
-                parser->current_token.type, parser->current_token.line);
-        err = IFJ_ESYNTAX;
-        goto cleanup;
-      }
-    }
-
-    if (parser->current_token.type == TOK_RPAREN) {
-      // Přeskočení pravé závorky
-      err = scanner_next_token(parser->scanner, &parser->current_token);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
-    } else {
-      LOG_ERR(IFJ_ESYNTAX,
-              "Expected ')' after function call parameters, got token type %d "
-              "on line %d",
-              parser->current_token.type, parser->current_token.line);
-      err = IFJ_ESYNTAX;
-      goto cleanup;
-    }
-
-    // Přidání seznamu parametrů do volání funkce
-    err = ast_func_call_add_param_list(func_call_ast, param_list_ast);
-    CHECK_ERR_LOG_GOTO(err, cleanup,
-                       "Failed to add parameter list to function call");
-
-    param_list_ast =
-        NULL; // Předání vlastnictví param_list_ast do func_call_ast
-  }
-
-  *out_ast = func_call_ast;
-  func_call_ast = NULL; // Předání vlastnictví func_call_ast do out_ast
-  return IFJ_SUCCESS;
-
-cleanup:
-  if (func_call_ast != NULL) {
-    ast_free(func_call_ast);
-    free(func_call_ast);
-  }
-  if (param_ast != NULL) {
-    ast_free(param_ast);
-    free(param_ast);
-  }
-  if (param_list_ast != NULL) {
-    ast_free(param_list_ast);
-    free(param_list_ast);
-  }
-  return err;
-}
-
-/**
  * @brief Zpracování výrazu pomocí precedenční analýzy
  * @param parser Parser
  * @param out_ast Výstupní AST uzel
@@ -960,34 +1048,6 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
 
   // Hlavní smyčka precedenční analýzy
   while (1) {
-    if (parser->current_token.type == TOK_ID ||
-        (parser->current_token.type == TOK_KEYWORD &&
-         parser->current_token.value.keyword == KW_LIST)) {
-      token_t token_peek;
-      err = scanner_peek_next_token(parser->scanner, &token_peek);
-      CHECK_ERR_LOG_GOTO(err, cleanup,
-                         "Failed to peek next token from scanner");
-
-      if (token_peek.type == TOK_LPAREN) {
-        // Pokud je aktuální token ID a následující token je LPAREN, tak se
-        // jedná o volání funkce
-        ast_node_t *func_call_ast = NULL;
-        err = parse_function_call(parser, &func_call_ast);
-        CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to parse function call");
-
-        // Vytvoření uzlu zásobníku pro volání funkce
-        push_node = create_psa_stack_node(PSA_NONTERM, func_call_ast, NULL);
-        CHECK_MEM_ERR_GOTO(push_node, cleanup);
-        err = stack_push(&stack, (void *)push_node);
-        CHECK_ERR_LOG_GOTO(err, cleanup,
-                           "Failed to push function call onto stack");
-        push_node = NULL;
-        func_call_ast = NULL; // Předání vlastnictví AST uzlu do zásobníku
-        continue; // Přeskočíme zbytek smyčky, protože jsme již zpracovali
-        // volání funkce
-      }
-    }
-
     // Získání symbolu na vrcholu zásobníku, který není neterminál (E) nebo
     // zarážka (<)
     stack_array_get_nonterm_count = 0;
@@ -1011,9 +1071,9 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
       err = psa_shift(&stack, parser, input_symbol, &expect_operand,
                       &open_parens, stack_array_get_nonterm,
                       &stack_array_get_nonterm_count, &stack_top_symbol);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to shift symbol onto the stack");
     } else if (relation == '>') {
-      err = psa_reduce(&stack, parser, input_symbol, &expression_done);
+      err = psa_reduce(&stack, parser, &expression_done);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to reduce expression");
       if (expression_done) {
         break;
@@ -1021,7 +1081,7 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
     } else if (relation == '=') {
       err = psa_equal(&stack, parser, input_symbol, &expect_operand,
                       &open_parens);
-      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to handle equal relation");
     } else if (relation == 'f') {
       // Syntaktická chyba
       err = IFJ_ESYNTAX;
@@ -1034,6 +1094,14 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
       // stack_deep_dtor uvolní zbytek zásobníku i jeho ast_node.
       stack_top(&stack, &data_out);
       psa_stack_node_t *top_node = (psa_stack_node_t *)data_out;
+
+      if (top_node->symbol != PSA_NONTERM || top_node->ast_node == NULL) {
+        err = IFJ_ESYNTAX;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Expected non-terminal with AST node on top of "
+                           "stack, got symbol %d and ast_node %p",
+                           top_node->symbol, (void *)top_node->ast_node);
+      }
       *out_ast = top_node->ast_node;
       top_node->ast_node = NULL;
 
