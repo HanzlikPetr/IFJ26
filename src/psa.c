@@ -236,8 +236,48 @@ static token_t *copy_token(const token_t *source) {
 }
 
 /**
- * @brief Získá neterminál z vrcholu zásobníku, který není neterminál ani
- * zarážka.
+ * @brief Uvolní uzel zásobníku PSA.
+ * @param data Ukazatel na uzel zásobníku PSA.
+ * @return IFJ_SUCCESS při úspěšném uvolnění nebo IFJ_EINTERNAL při chybě.
+ */
+static IFJ_ERR psa_stack_node_dtor(void *data) {
+  psa_stack_node_t *node = data;
+
+  if (node == NULL) {
+    return IFJ_EINTERNAL;
+  }
+
+  if (node->ast_node != NULL) {
+    ast_free(node->ast_node);
+  }
+
+  if (node->token != NULL) {
+    token_free(node->token);
+    free(node->token);
+  }
+
+  free(node);
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Uvolní uzly zásobníku PSA uložené v poli.
+ * @param nodes Pole uzlů zásobníku PSA.
+ * @param count Počet platných uzlů v poli.
+ */
+static void free_psa_stack_nodes(psa_stack_node_t *nodes[], int count) {
+  for (int i = 0; i < count; i++) {
+    psa_stack_node_dtor(nodes[i]);
+  }
+}
+
+/**
+ * @brief Najde na vrcholu zásobníku první symbol, který není neterminál (E)
+ * ani zarážka (<), tedy terminál pro určení precedenčního vztahu.
+ *
+ * Neterminály a zarážky nad tímto terminálem jsou odebrány ze zásobníku a
+ * uloženy do pole stack_array (volající je po použití vrací zpět na zásobník
+ * funkcí push_single_term).
  * @param stack Zásobník PSA.
  * @param stack_array Pole pro uchování uzlů zásobníku při získávání
  * neterminálu.
@@ -280,7 +320,9 @@ static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
 
   if (!found_nonterm) {
     // Pokud nebyl nalezen symbol, který není neterminál ani zarážka, tak je
-    // to chyba
+    // to chyba; odebrané uzly je nutné uvolnit, aby nedošlo k úniku paměti
+    free_psa_stack_nodes(stack_array, *out_count);
+    *out_count = 0;
     CHECK_ERR_LOG_RET(IFJ_ESYNTAX,
                       "Failed to find a valid symbol on the stack, on line %d",
                       parser->current_token.line);
@@ -290,32 +332,11 @@ static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
 }
 
 /**
- * @brief Uvolní uzel zásobníku PSA.
- * @param data Ukazatel na uzel zásobníku PSA.
- * @return IFJ_SUCCESS při úspěšném uvolnění nebo IFJ_EINTERNAL při chybě.
- */
-static IFJ_ERR psa_stack_node_dtor(void *data) {
-  psa_stack_node_t *node = data;
-
-  if (node == NULL) {
-    return IFJ_EINTERNAL;
-  }
-
-  if (node->ast_node != NULL) {
-    ast_free(node->ast_node);
-  }
-
-  if (node->token != NULL) {
-    token_free(node->token);
-    free(node->token);
-  }
-
-  free(node);
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Vrátí terminál na vrcholu zásobníku.
+ * @brief Vrátí uzly odebrané ze zásobníku funkcí get_nonterm_from_stack
+ * zpět na vrchol zásobníku.
+ *
+ * Na vrcholu zásobníku nesmí ležet dva neterminály (E) ani zarážky (<)
+ * bezprostředně za sebou, takže odebrat lze maximálně jeden uzel.
  * @param stack Zásobník PSA.
  * @param nodes Pole uzlů zásobníku.
  * @param node_count Počet uzlů v poli nodes.
@@ -331,9 +352,7 @@ static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
     err = stack_push(stack, (void *)nodes[0]);
     CHECK_ERR_LOG_RET(err, "Failed to push symbol onto the stack");
   } else if (node_count > 1) {
-    for (int i = 0; i < node_count; i++) {
-      psa_stack_node_dtor(nodes[i]);
-    }
+    free_psa_stack_nodes(nodes, node_count);
     CHECK_ERR_LOG_RET(IFJ_ESYNTAX, "Expected 1 symbol, got %d, on line %d",
                       node_count, parser->current_token.line);
   }
@@ -342,11 +361,10 @@ static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
 }
 
 /**
- * @brief Zpracuje redukci v precedenční analýze.
- * @param stack Zásobník PSA.
- * @param parser Parser používaný pro diagnostiku chyb.
- * @param stack_array_reduce Pole pro uchování uzlů zásobníku při redukci.
- * @param stack_array_reduce_count Počet uzlů v poli stack_array_reduce.
+ * @brief Vytvoří AST uzel pro literál (celé číslo, desetinné číslo, řetězec,
+ * jednotková hodnota () nebo booleovská hodnota).
+ * @param token Token obsahující hodnotu literálu.
+ * @param out_ast Ukazatel na vytvořený AST uzel.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
  */
 static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
@@ -414,7 +432,7 @@ static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
   CHECK_ARGS_NULL_RET(token, out_ast);
 
   if (token->type != TOK_ID &&
-      (token->type == TOK_KEYWORD && token->value.keyword != KW_LIST)) {
+      !(token->type == TOK_KEYWORD && token->value.keyword == KW_LIST)) {
     LOG_ERR(
         IFJ_ESYNTAX,
         "Expected identifier or 'list' keyword, got token type %d on line %d",
@@ -745,8 +763,12 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
                       stack_array_get_nonterm, stack_array_get_nonterm_count,
                       stack_top_symbol);
 
-  // Kontrola, zda se jedná o volání funkce nebo o LIST (klíčové slovo)
-  if (parser->current_token.type == TOK_ID ||
+  // Kontrola, zda se jedná o volání funkce nebo o LIST (klíčové slovo).
+  // Pozn.: 'to' a 'until' jsou kontextuální klíčová slova operátorů rozsahu,
+  // nikdy se nejedná o volání funkce, ať je následuje jakýkoli token.
+  if ((parser->current_token.type == TOK_ID &&
+       strcmp("to", parser->current_token.value.str_value) != 0 &&
+       strcmp("until", parser->current_token.value.str_value) != 0) ||
       (parser->current_token.type == TOK_KEYWORD &&
        parser->current_token.value.keyword == KW_LIST)) {
     err = scanner_peek_next_token(parser->scanner, &token_peek);
@@ -765,7 +787,11 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
         return IFJ_EINTERNAL;
       }
       err = stack_push(stack, (void *)push_node);
-      CHECK_ERR_LOG_RET(err, "Failed to push function call onto stack");
+      if (err != IFJ_SUCCESS) {
+        LOG_ERR(err, "Failed to push function call onto stack");
+        psa_stack_node_dtor(push_node);
+        return err;
+      }
 
       *expect_operand = false;
       return IFJ_SUCCESS;
@@ -779,11 +805,19 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
 
   push_node = create_psa_stack_node(PSA_HANDLE, NULL, NULL);
   if (!push_node) {
+    free_psa_stack_nodes(stack_array_get_nonterm,
+                         *stack_array_get_nonterm_count);
     token_free(&parser->current_token);
     return IFJ_EINTERNAL;
   }
   err = stack_push(stack, (void *)push_node);
-  CHECK_ERR_LOG_RET(err, "Failed to push handle onto the stack");
+  if (err != IFJ_SUCCESS) {
+    LOG_ERR(err, "Failed to push handle onto the stack");
+    psa_stack_node_dtor(push_node);
+    free_psa_stack_nodes(stack_array_get_nonterm,
+                         *stack_array_get_nonterm_count);
+    return err;
+  }
 
   err = push_single_term(stack, stack_array_get_nonterm,
                          *stack_array_get_nonterm_count, parser);
@@ -795,9 +829,18 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
     return IFJ_EINTERNAL;
   }
   push_node = create_psa_stack_node(input_symbol, NULL, token);
-  CHECK_MEM_ERR(push_node);
+  if (!push_node) {
+    token_free(token);
+    free(token);
+    token_free(&parser->current_token);
+    return IFJ_EINTERNAL;
+  }
   err = stack_push(stack, (void *)push_node);
-  CHECK_ERR_LOG_RET(err, "Failed to push symbol onto the stack");
+  if (err != IFJ_SUCCESS) {
+    LOG_ERR(err, "Failed to push symbol onto the stack");
+    psa_stack_node_dtor(push_node);
+    return err;
+  }
 
   if (input_symbol == PSA_L_PAREN) {
     (*open_parens)++;
@@ -815,11 +858,9 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
  * @brief Redukuje handle na neterminál E.
  * @param stack Zásobník PSA.
  * @param parser Parser používaný pro diagnostiku chyb.
- * @param expression_done Nastaví se na true při úspěšném ukončení výrazu.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
  */
-static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
-                          bool *expression_done) {
+static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser) {
   IFJ_ERR err = IFJ_SUCCESS;
   bool found_handle = false;
   bool is_empty;
@@ -829,8 +870,7 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
   psa_stack_node_t *push_node = NULL;
   ast_node_t *new_ast_node = NULL;
 
-  CHECK_ARGS_NULL_RET(stack, parser, expression_done);
-  *expression_done = false;
+  CHECK_ARGS_NULL_RET(stack, parser);
 
   err = stack_is_empty(stack, &is_empty);
   CHECK_ERR_LOG_RET(err, "Failed to check if stack is empty");
@@ -852,16 +892,9 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
     }
   }
 
-  // Pokud nebyla nalezena zarážka, zkontrolujeme, zda-li se jedná o konec
-  // výrazu
+  // Pokud nebyla nalezena zarážka, jedná se o chybný stav zásobníku
+  // (konec výrazu řeší relace 'e' v process_expression, nikoliv redukce)
   if (!found_handle) {
-    if (reduce_nodes[0]->symbol == PSA_DOLLAR &&
-        reduce_nodes[1]->symbol == PSA_NONTERM &&
-        reduce_nodes[2]->symbol == PSA_DOLLAR) {
-      *expression_done = true;
-      goto cleanup;
-    }
-
     err = IFJ_ESYNTAX;
     LOG_ERR(err, "Failed to find a handle symbol on the stack, on line %d",
             parser->current_token.line);
@@ -949,7 +982,11 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
   // Vytvoření nového uzlu zásobníku pro neterminál E, včetně vytovřené části
   // ast, a jeho vložení na zásobník
   push_node = create_psa_stack_node(PSA_NONTERM, new_ast_node, NULL);
-  CHECK_MEM_ERR_GOTO(push_node, cleanup);
+  if (!push_node) {
+    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed");
+    goto cleanup;
+  }
+  new_ast_node = NULL; // Vlastnictví AST uzlu přešlo na push_node
   err = stack_push(stack, (void *)push_node);
   CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to push node onto stack");
   push_node = NULL;
@@ -957,6 +994,9 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser,
 cleanup:
   if (push_node != NULL) {
     psa_stack_node_dtor(push_node);
+  }
+  if (new_ast_node != NULL) {
+    ast_free(new_ast_node);
   }
   for (int i = 0; i < reduce_count; i++) {
     psa_stack_node_dtor(reduce_nodes[i]);
@@ -1019,7 +1059,7 @@ static IFJ_ERR psa_equal(stack_t *stack, parser_t *parser,
 static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
   IFJ_ERR err;
   stack_t stack;
-  bool expect_operand, expression_done;
+  bool expect_operand;
   int open_parens;
   char relation;
   psa_symbol_t stack_top_symbol, input_symbol;
@@ -1029,6 +1069,10 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
                                           // při získávání neterminálu
   int stack_array_get_nonterm_count = 0;
   void *data_out = NULL;
+
+  // Inicializace výstupního ukazatele, aby byl vždy platný i na chybových
+  // cestách (volající tak může předat neinicializovaný ukazatel)
+  *out_ast = NULL;
 
   // Inicializace pomocných proměnných
   expect_operand = true; // Na začátku výrazu očekáváme operand
@@ -1073,11 +1117,8 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
                       &stack_array_get_nonterm_count, &stack_top_symbol);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to shift symbol onto the stack");
     } else if (relation == '>') {
-      err = psa_reduce(&stack, parser, &expression_done);
+      err = psa_reduce(&stack, parser);
       CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to reduce expression");
-      if (expression_done) {
-        break;
-      }
     } else if (relation == '=') {
       err = psa_equal(&stack, parser, input_symbol, &expect_operand,
                       &open_parens);
@@ -1092,7 +1133,8 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
 
       // Získání AST uzlu z vrcholu zásobníku; neodstraníme ho z uzlu, protože
       // stack_deep_dtor uvolní zbytek zásobníku i jeho ast_node.
-      stack_top(&stack, &data_out);
+      err = stack_top(&stack, &data_out);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get top of stack");
       psa_stack_node_t *top_node = (psa_stack_node_t *)data_out;
 
       if (top_node->symbol != PSA_NONTERM || top_node->ast_node == NULL) {
