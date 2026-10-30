@@ -20,6 +20,24 @@
  * parser nastaven na token za výrazem (tady ';'). Výsledný AST uzel bude uložen
  * do out_ast.
  *
+ * Smlouva pro autora parseru (parser.c):
+ *
+ * - Při chybě je pozice current_token nedefinovaná (PSA se zastaví tam, kde
+ *   chybu našla) - volající musí kompilaci ukončit chybovým kódem.
+ * - PSA nikdy nekonzumuje "to"/"until" na nejvyšší úrovni (mimo závorky)
+ *   ani "by" - syntaxi for-generátoru "for i <- výraz to výraz [by výraz]
+ *   do" musí zpracovat parser sám. Pozor: "by" skener nevydává jako klíčové
+ *   slovo, jde o běžné TOK_ID (identifikátor).
+ * - Klíčové slovo List, po kterém nenásleduje '(', se redukuje na AST_VAR
+ *   s identifikátorem "List" - vestavěné členy jako List.range musí
+ *   rozpoznat sémantická analýza.
+ * - "(1 to 10 by 2)" uvnitř závorek je syntaktická chyba - "by" je podle
+ *   specifikace povoleno pouze v hlavičce for-generátoru (vědomé
+ *   rozhodnutí implementace).
+ * - Argumenty volání funkce se analyzují rekurzivním voláním
+ *   psa_parse_expression - u patologicky zanořeného vstupu hrozí přetečení
+ *   zásobníku.
+ *
  * @param parser Ukazatel na parser.
  * @param out_ast Ukazatel na výstupní AST uzel.
  * @return IFJ_SUCCESS, pokud je analýza úspěšná, jinak chybový kód.
