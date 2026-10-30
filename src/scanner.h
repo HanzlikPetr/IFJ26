@@ -88,9 +88,11 @@ typedef enum {
 
   TOK_INDENT, // začátek odsazení
   TOK_DEDENT, // konec odsazení
-  TOK_NULL, // literál ()
-  TOK_TO, // klíčové slovo "to"
-  TOK_UNTIL, // klíčové slovo "until"
+  // Pozn.: Skener následující tři typy NIKDY nevydá - slouží pouze jako
+  // značky operátorů při konstrukci AST v psa.c.
+  TOK_NULL, // unit literál "()" - pouze značka v AST
+  TOK_TO, // operátor "to" - pouze značka v AST
+  TOK_UNTIL, // operátor "until" - pouze značka v AST
 } token_type_t;
 
 /**
