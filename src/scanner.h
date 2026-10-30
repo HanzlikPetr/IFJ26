@@ -89,6 +89,8 @@ typedef enum {
   TOK_INDENT, // začátek odsazení
   TOK_DEDENT, // konec odsazení
   TOK_NULL, // literál ()
+  TOK_TO, // klíčové slovo "to"
+  TOK_UNTIL, // klíčové slovo "until"
 } token_type_t;
 
 /**
