@@ -8,3 +8,4 @@ import ifj26.*
     s = s + i
     i = i + 1
   print(s)
+  print("\n")

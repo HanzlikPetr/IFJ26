@@ -6,3 +6,4 @@ import ifj26.*
   /* viceradkovy
      /* vnoreny */ komentar */
   print(x) // radkovy
+  print("\n")
