@@ -1,0 +1,5 @@
+// Chyba 3: chybi funkce s @main
+import ifj26.*
+
+def f(): Unit =
+  print(1)

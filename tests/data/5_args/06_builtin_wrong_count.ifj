@@ -1,0 +1,5 @@
+// Chyba 5: spatny pocet argumentu vestavene funkce
+import ifj26.*
+
+@main def main(): Unit =
+  print(1, 2)

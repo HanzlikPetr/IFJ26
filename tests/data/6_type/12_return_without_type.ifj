@@ -1,0 +1,9 @@
+// Chyba 6: return ve funkci bez explicitniho navratoveho typu
+import ifj26.*
+
+def f(x: Int) =
+  return x
+
+@main def main(): Unit =
+  val y = f(1)
+  print(y)

@@ -1,0 +1,6 @@
+// Chyba 40: subStr end > delka
+import ifj26.*
+
+@main def main(): Unit =
+  val s = subStr("abc", 0, 10)
+  print(s)

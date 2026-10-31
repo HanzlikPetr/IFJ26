@@ -1,0 +1,7 @@
+// Chyba 2: prazdne telo funkce
+import ifj26.*
+
+def f(): Unit =
+
+@main def main(): Unit =
+  f()

@@ -1,0 +1,7 @@
+// Chyba 40: tail prazdneho seznamu
+import ifj26.*
+
+@main def main(): Unit =
+  val e: List[Int] = List()
+  val t = e.tail
+  print(t)

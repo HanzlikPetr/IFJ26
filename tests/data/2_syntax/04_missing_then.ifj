@@ -1,0 +1,7 @@
+// Chyba 2: chybi 'then'
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 2
+  if x > 1
+    print(x)

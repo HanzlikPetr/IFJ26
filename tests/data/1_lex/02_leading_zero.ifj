@@ -1,0 +1,6 @@
+// Chyba 1: nenulovy literal zacina nulou
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 012
+  print(x)

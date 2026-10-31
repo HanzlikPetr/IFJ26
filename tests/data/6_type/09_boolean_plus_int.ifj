@@ -1,0 +1,6 @@
+// Chyba 6: Boolean + Int
+import ifj26.*
+
+@main def main(): Unit =
+  val b = true + 1
+  print(b)

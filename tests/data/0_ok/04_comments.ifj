@@ -1,0 +1,8 @@
+// Spravny program: vnorene a viceradkove komentare
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 1 /* jednoradkovy */ + 2
+  /* viceradkovy
+     /* vnoreny */ komentar */
+  print(x) // radkovy

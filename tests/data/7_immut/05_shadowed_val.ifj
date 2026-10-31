@@ -1,0 +1,10 @@
+// Chyba 7: prirazeni do val, ktery prekryva var
+import ifj26.*
+
+@main def main(): Unit =
+  var x = 1
+  if x > 0 then
+    val x = 2
+    x = 3
+  else
+    x = 4

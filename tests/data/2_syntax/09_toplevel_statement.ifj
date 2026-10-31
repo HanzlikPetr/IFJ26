@@ -1,0 +1,7 @@
+// Chyba 2: prikaz na nejvyssi urovni
+import ifj26.*
+
+val x = 5
+
+@main def main(): Unit =
+  print(x)

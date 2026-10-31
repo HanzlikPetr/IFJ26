@@ -1,0 +1,6 @@
+// Chyba 1: neukonceny retezec (konec radku uvnitr)
+import ifj26.*
+
+@main def main(): Unit =
+  val s = "ahoj
+  print(s)

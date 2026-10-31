@@ -1,0 +1,6 @@
+// Chyba 6: seznam s prvky ruznych typu
+import ifj26.*
+
+@main def main(): Unit =
+  val l = List(1, "a")
+  print(l)

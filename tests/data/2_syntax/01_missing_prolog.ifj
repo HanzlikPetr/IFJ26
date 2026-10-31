@@ -1,0 +1,3 @@
+// Chyba 2: chybi prolog
+@main def main(): Unit =
+  print(1)

@@ -1,0 +1,8 @@
+// Chyba 3: parametr jine funkce
+import ifj26.*
+
+def f(n: Int): Int =
+  n + 1
+
+@main def main(): Unit =
+  print(n)

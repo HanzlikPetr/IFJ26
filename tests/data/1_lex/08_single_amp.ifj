@@ -1,0 +1,7 @@
+// Chyba 1: samotny znak '&'
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 3
+  if x > 0 & x < 5 then
+    print(x)

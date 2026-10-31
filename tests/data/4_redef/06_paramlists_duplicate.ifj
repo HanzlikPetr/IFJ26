@@ -1,0 +1,9 @@
+// Chyba 4: stejne jmeno parametru ve vice seznamech (PARAMLISTS)
+import ifj26.*
+
+def add(a: Int)(a: Int): Int =
+  a
+
+@main def main(): Unit =
+  val x = add(1)(2)
+  print(x)

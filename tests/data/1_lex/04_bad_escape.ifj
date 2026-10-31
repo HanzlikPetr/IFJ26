@@ -1,0 +1,6 @@
+// Chyba 1: neplatna escape sekvence \q
+import ifj26.*
+
+@main def main(): Unit =
+  val s = "a\qb"
+  print(s)

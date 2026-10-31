@@ -1,0 +1,10 @@
+// Chyba 7: prirazeni do parametru
+import ifj26.*
+
+def f(a: Int): Int =
+  a = 5
+  a
+
+@main def main(): Unit =
+  val x = f(1)
+  print(x)

@@ -1,0 +1,9 @@
+// Chyba 5: prilis malo argumentu
+import ifj26.*
+
+def g(a: Int, b: Int): Int =
+  a + b
+
+@main def main(): Unit =
+  val x = g(1)
+  print(x)

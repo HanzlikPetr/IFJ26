@@ -1,0 +1,9 @@
+// Chyba 7: prirazeni do vnejsiho val v cyklu
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 1
+  var i = 0
+  while i < 3 do
+    x = i
+    i = i + 1

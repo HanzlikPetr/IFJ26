@@ -1,0 +1,6 @@
+// Chyba 6: inicializace Int hodnotou Double
+import ifj26.*
+
+@main def main(): Unit =
+  val x: Int = 1.5
+  print(x)

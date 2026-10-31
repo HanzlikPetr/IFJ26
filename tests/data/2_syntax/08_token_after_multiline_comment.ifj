@@ -1,0 +1,6 @@
+// Chyba 2: token za viceradkovym komentarem
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 1 /* a
+  b */ print(x)

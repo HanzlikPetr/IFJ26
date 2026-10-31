@@ -1,0 +1,6 @@
+// Chyba 5: subStr se dvema argumenty
+import ifj26.*
+
+@main def main(): Unit =
+  val s = subStr("abc", 1)
+  print(s)

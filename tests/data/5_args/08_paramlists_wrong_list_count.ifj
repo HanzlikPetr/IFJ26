@@ -1,0 +1,9 @@
+// Chyba 5: spatny pocet seznamu argumentu (PARAMLISTS)
+import ifj26.*
+
+def add(a: Int)(b: Int)(c: Int): Int =
+  a + b + c
+
+@main def main(): Unit =
+  val x = add(1)(2)
+  print(x)

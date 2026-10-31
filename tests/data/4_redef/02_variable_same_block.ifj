@@ -1,0 +1,7 @@
+// Chyba 4: redefinice promenne ve stejnem bloku
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 1
+  val x = 2
+  print(x)

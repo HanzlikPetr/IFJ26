@@ -1,0 +1,6 @@
+// Chyba 2: chybi vyraz za '='
+import ifj26.*
+
+@main def main(): Unit =
+  val x =
+  print(x)
