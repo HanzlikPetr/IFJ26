@@ -1,0 +1,5 @@
+// Chyba 3: nedefinovana funkce
+import ifj26.*
+
+@main def main(): Unit =
+  foo(1)

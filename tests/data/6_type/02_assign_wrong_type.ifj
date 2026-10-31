@@ -1,0 +1,7 @@
+// Chyba 6: prirazeni jineho typu
+import ifj26.*
+
+@main def main(): Unit =
+  var x = 1
+  x = "a"
+  print(x)

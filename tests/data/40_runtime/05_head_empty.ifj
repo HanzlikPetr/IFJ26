@@ -1,0 +1,7 @@
+// Chyba 40: head prazdneho seznamu
+import ifj26.*
+
+@main def main(): Unit =
+  val e: List[Int] = List()
+  val h = e.head
+  print(h)

@@ -1,0 +1,5 @@
+// Chyba 3: nedefinovana promenna
+import ifj26.*
+
+@main def main(): Unit =
+  print(y)

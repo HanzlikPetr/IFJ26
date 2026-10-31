@@ -1,0 +1,7 @@
+// Chyba 2: prolog dvakrat
+import ifj26.*
+
+import ifj26.*
+
+@main def main(): Unit =
+  print(1)

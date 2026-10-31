@@ -1,0 +1,6 @@
+// Chyba 3: nedefinovany typ
+import ifj26.*
+
+@main def main(): Unit =
+  val x: Foo = 1
+  print(x)

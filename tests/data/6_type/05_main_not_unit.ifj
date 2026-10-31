@@ -1,0 +1,6 @@
+// Chyba 6: @main nevraci Unit
+import ifj26.*
+
+@main def main(): Int =
+  print(1)
+  0

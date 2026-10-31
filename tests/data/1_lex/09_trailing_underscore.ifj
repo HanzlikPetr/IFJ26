@@ -1,0 +1,6 @@
+// Chyba 1: podtrzitko na konci cisla
+import ifj26.*
+
+@main def main(): Unit =
+  val x = 1_000_
+  print(x)

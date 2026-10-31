@@ -1,0 +1,7 @@
+// Chyba 4: var a val stejneho jmena ve stejnem bloku
+import ifj26.*
+
+@main def main(): Unit =
+  var x = 1
+  val x = 2
+  print(x)

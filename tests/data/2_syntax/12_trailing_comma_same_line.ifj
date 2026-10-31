@@ -1,0 +1,6 @@
+// Chyba 2: koncova carka bez konce radku
+import ifj26.*
+
+@main def main(): Unit =
+  val s = subStr("abcdef", 1, 3, )
+  print(s)

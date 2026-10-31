@@ -1,0 +1,9 @@
+// Chyba 6: navratova hodnota neodpovida typu
+import ifj26.*
+
+def f(): Int =
+  "a"
+
+@main def main(): Unit =
+  val x = f()
+  print(x)

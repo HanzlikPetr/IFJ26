@@ -1,0 +1,7 @@
+// Chyba 40: nulovy krok z promenne
+import ifj26.*
+
+@main def main(): Unit =
+  val s = 0
+  for i <- 1 to 5 by s do
+    print(i)

@@ -1,0 +1,7 @@
+// Chyba 7: prirazeni do val typu Boolean
+import ifj26.*
+
+@main def main(): Unit =
+  val b = true
+  b = false
+  print(b)

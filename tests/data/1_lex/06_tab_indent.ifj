@@ -1,0 +1,5 @@
+// Chyba 1: tabulator v odsazeni
+import ifj26.*
+
+@main def main(): Unit =
+	print(1)

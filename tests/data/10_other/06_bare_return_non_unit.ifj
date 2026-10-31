@@ -1,0 +1,9 @@
+// Chyba 10: samostatny return ve funkci, ktera nevraci Unit
+import ifj26.*
+
+def f(): Int =
+  return
+
+@main def main(): Unit =
+  val x = f()
+  print(x)

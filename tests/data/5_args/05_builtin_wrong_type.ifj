@@ -1,0 +1,6 @@
+// Chyba 5: spatny typ argumentu vestavene funkce
+import ifj26.*
+
+@main def main(): Unit =
+  val n = strLength(5)
+  print(n)

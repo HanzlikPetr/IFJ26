@@ -1,0 +1,5 @@
+// Chyba 5: @main s parametrem
+import ifj26.*
+
+@main def main(x: Int): Unit =
+  print(x)

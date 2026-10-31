@@ -1,0 +1,6 @@
+// Chyba 10: nulovy krok, sestupny rozsah
+import ifj26.*
+
+@main def main(): Unit =
+  for i <- 10 to 1 by 0 do
+    print(i)

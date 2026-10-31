@@ -1,0 +1,6 @@
+// Chyba 1: neukonceny vnoreny blokovy komentar
+import ifj26.*
+
+@main def main(): Unit =
+  print(1)
+/* vnejsi /* vnitrni */ chybi konec

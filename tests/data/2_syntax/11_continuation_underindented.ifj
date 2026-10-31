@@ -1,0 +1,7 @@
+// Chyba 2: pokracovaci radek v zavorce neni odsazeny vic
+import ifj26.*
+
+@main def main(): Unit =
+  val s = subStr("abcdef", 1,
+3)
+  print(s)

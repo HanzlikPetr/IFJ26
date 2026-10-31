@@ -1,0 +1,7 @@
+// Chyba 40: subStr zaporny start
+import ifj26.*
+
+@main def main(): Unit =
+  val start = 0 - 1
+  val s = subStr("abc", start, 2)
+  print(s)

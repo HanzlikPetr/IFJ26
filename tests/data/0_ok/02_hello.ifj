@@ -1,0 +1,5 @@
+// Spravny program: vypis retezce
+import ifj26.*
+
+@main def main(): Unit =
+  print("Ahoj\n")
