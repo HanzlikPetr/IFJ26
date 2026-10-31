@@ -8,3 +8,4 @@ import ifj26.*
   else
     ()
   print("konec")
+  print("\n")
