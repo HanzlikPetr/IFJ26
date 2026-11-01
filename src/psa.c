@@ -365,15 +365,20 @@ static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
  * jednotková hodnota () nebo booleovská hodnota).
  * @param token Token obsahující hodnotu literálu.
  * @param out_ast Ukazatel na vytvořený AST uzel.
+ * @param is_folded Příznak, zda je literál výsledkem složení.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
  */
-static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
+static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast,
+                                  bool is_folded) {
   CHECK_ARGS_NULL_RET(token, out_ast);
 
   ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
   CHECK_MEM_ERR(new_ast_node);
 
   new_ast_node->type = AST_LITERAL;
+  new_ast_node->as.literal.is_folded = is_folded;
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
 
   switch (token->type) {
   case TOK_INT:
@@ -413,10 +418,6 @@ static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast) {
     free(new_ast_node);
     return IFJ_ESYNTAX;
   }
-
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
-  new_ast_node->as.literal.is_folded = false;
 
   *out_ast = new_ast_node;
   return IFJ_SUCCESS;
@@ -522,7 +523,7 @@ static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
 
   ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
   CHECK_MEM_ERR(new_ast_node);
-  
+
   new_ast_node->type = AST_EXPR;
   new_ast_node->as.expr.is_unary = true;
   new_ast_node->as.expr.operator_type = operator_token->type;
@@ -651,7 +652,10 @@ static IFJ_ERR parse_function_call(parser_t *parser, ast_node_t **out_ast) {
 
     // Vytvoření seznamu parametrů
     param_list_ast = malloc(sizeof *param_list_ast);
-    CHECK_MEM_ERR_GOTO(param_list_ast, cleanup);
+    if (param_list_ast == NULL) {
+      err = IFJ_EINTERNAL;
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Memory allocation failed");
+    }
     init_param_list_ast(param_list_ast);
 
     // Naplnění seznamu parametrů volání funkce
@@ -731,6 +735,391 @@ cleanup:
     ast_free(param_list_ast);
   }
   return err;
+}
+
+/**
+ * @brief Provede konstantní složení (constant folding) unárního výrazu, pokud
+ * je možné jej bezpečně složit.
+ *
+ * @param root Ukazatel na kořen AST uzlu unárního výrazu
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód
+ */
+static IFJ_ERR constant_fold_unary(ast_node_t **root) {
+  token_t token = {0};
+  IFJ_ERR err;
+  ast_node_t *folded_node = NULL;
+  ast_node_t *operand = NULL;
+
+  if (!(*root) || (*root)->type != AST_EXPR || !(*root)->as.expr.is_unary) {
+    return IFJ_SUCCESS; // Není unární výraz, není co složit
+  }
+
+  if ((*root)->as.expr.unary.operand->type != AST_LITERAL) {
+    return IFJ_SUCCESS; // Operand není literál, není co složit
+  }
+
+  operand = (*root)->as.expr.unary.operand;
+
+  if ((*root)->as.expr.operator_type == TOK_SUB) {
+    // Unární minus složíme pouze pro číselné literály
+    if (operand->as.literal.type == TYPE_INT) {
+      token.type = TOK_INT;
+      token.value.int_value = -operand->as.literal.int_value;
+    } else if (operand->as.literal.type == TYPE_DOUBLE) {
+      token.type = TOK_FLOAT;
+      token.value.double_value = -operand->as.literal.double_value;
+    } else {
+      return IFJ_SUCCESS; // Nesložitelný typ, necháme na sémantické analýze
+    }
+  } else if ((*root)->as.expr.operator_type == TOK_NOT) {
+    // Negaci složíme pouze pro Bool literály
+    if (operand->as.literal.type == TYPE_BOOL) {
+      token.type = TOK_KEYWORD;
+      token.value.keyword = operand->as.literal.bool_value ? KW_FALSE : KW_TRUE;
+    } else {
+      return IFJ_SUCCESS; // Nesložitelný typ, necháme na sémantické analýze
+    }
+  } else {
+    // Jiný unární operátor neumíme složit, výraz necháme beze změny
+    return IFJ_SUCCESS;
+  }
+
+  err = create_ast_literal(&token, &folded_node, operand->as.literal.is_folded);
+  CHECK_ERR_LOG_RET(err, "Failed to create AST literal for constant folding");
+
+  ast_free(*root);
+  *root = folded_node;
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Provede konstantní složení zřetězení dvou seznamů List ++ List.
+ *
+ * Prvky pravého seznamu přesune do seznamu parametrů levého seznamu
+ * (přenáší vlastnictví uzlů prvků). Volající zajišťuje, že oba uzly jsou
+ * volání seznamu List.
+ * @param left_list Levý seznam (přejímá prvky pravého seznamu).
+ * @param right_list Pravý seznam (předá své prvky levému seznamu).
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR constant_fold_list_concat(ast_node_t **left_list,
+                                         ast_node_t **right_list) {
+  IFJ_ERR err;
+
+  if (!(*left_list) || !(*right_list)) {
+    return IFJ_SUCCESS; // Jeden z operandů je NULL, není co složit
+  }
+
+  // Složíme dva seznamy dohromady
+  size_t right_size = (*right_list)->as.func_call.param_lists_cnt;
+
+  // Prvky z pravého seznamu přidáme do levého seznamu
+  for (size_t i = 0; i < right_size; i++) {
+    size_t params_cnt =
+        (*right_list)->as.func_call.param_lists[i]->as.param_list.params_cnt;
+
+    for (size_t j = 0; j < params_cnt; j++) {
+      ast_node_t *param =
+          (*right_list)->as.func_call.param_lists[i]->as.param_list.params[j];
+
+      err = ast_func_call_param_list_add_arg(
+          (*left_list)->as.func_call.param_lists[0], param);
+      CHECK_ERR_LOG_RET(err, "Failed to add parameter to parameter list");
+      // Předání vlastnictví parametru do levého seznamu
+      (*right_list)->as.func_call.param_lists[i]->as.param_list.params[j] =
+          NULL;
+    }
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Zjistí, zda je uzel numerický literál (Int nebo Double).
+ * @param node Testovaný AST uzel.
+ * @return true, pokud je uzel literál typu Int nebo Double.
+ */
+static bool is_numeric_literal(const ast_node_t *node) {
+  return node->type == AST_LITERAL && (node->as.literal.type == TYPE_INT ||
+                                       node->as.literal.type == TYPE_DOUBLE);
+}
+
+/**
+ * @brief Vrátí hodnotu numerického literálu (Int nebo Double) jako double.
+ *
+ * Volající musí zajistit, že uzel je numerický literál.
+ * @param node AST uzel numerického literálu.
+ * @return Hodnota literálu převedená na double.
+ */
+static double literal_as_double(const ast_node_t *node) {
+  if (node->as.literal.type == TYPE_INT) {
+    return (double)node->as.literal.int_value;
+  }
+  return node->as.literal.double_value;
+}
+
+/**
+ * @brief Provede konstantní složení (constant folding) binárního výrazu.
+ *
+ * Složit lze pouze výrazy, jejichž výsledek je znám už při syntaktické
+ * analýze: aritmetiku a porovnávání číselných literálů, logické operace nad
+ * Bool literály, zřetězení řetězcových literálů operátorem + a zřetězení
+ * seznamů List(...) ++ List(...). Výraz, který bezpečně složit nelze (operand
+ * není literál, dělení nulou, neznámá kombinace typů, ...), zůstane beze
+ * změny a funkce vrátí IFJ_SUCCESS - typové kontroly provede sémantická
+ * analýza.
+ * @param root Kořen AST uzlu binárního výrazu.
+ * @return IFJ_SUCCESS při úspěchu (ať už složeno, nebo nesloženo) nebo
+ * chybový kód.
+ */
+static IFJ_ERR constant_fold_binary(ast_node_t **root) {
+  ast_node_t *folded_node = NULL;
+  IFJ_ERR err;
+  token_t token = {0};
+
+  if (!(*root) || (*root)->type != AST_EXPR || (*root)->as.expr.is_unary) {
+    return IFJ_SUCCESS; // Není binární výraz, není co složit
+  }
+
+  // Zřetězení seznamů List(...) ++ List(...) složíme jen u správně
+  // zapsaných seznamů - každý operand musí mít právě jeden seznam argumentů.
+  // Chybné použití konstruktoru List (např. List(1)(2)) necháváme beze změny
+  // na sémantické analýze.
+  if ((*root)->as.expr.operator_type == TOK_CONCAT &&
+      (*root)->as.expr.binary.lhs->type == AST_FUNC_CALL &&
+      (*root)->as.expr.binary.rhs->type == AST_FUNC_CALL &&
+      (*root)->as.expr.binary.lhs->as.func_call.param_lists_cnt == 1 &&
+      (*root)->as.expr.binary.rhs->as.func_call.param_lists_cnt == 1) {
+    // Složíme dva seznamy dohromady
+    err = constant_fold_list_concat(&(*root)->as.expr.binary.lhs,
+                                    &(*root)->as.expr.binary.rhs);
+    CHECK_ERR_LOG_RET(err, "Failed to constant fold list concatenation");
+
+    // Uvolníme původní binární uzel a nahradíme ho složeným seznamem
+    folded_node = (*root)->as.expr.binary.lhs;
+    (*root)->as.expr.binary.lhs = NULL; // Předání vlastnictví složeného seznamu
+    ast_free(*root);
+    *root = folded_node;
+
+    return IFJ_SUCCESS;
+  }
+
+  // Ostatní operátory složíme jen tehdy, když jsou oba operandy literály;
+  // výrazy s proměnnými či voláními funkcí necháváme na sémantické analýze
+  if ((*root)->as.expr.binary.lhs->type != AST_LITERAL ||
+      (*root)->as.expr.binary.rhs->type != AST_LITERAL) {
+    return IFJ_SUCCESS;
+  }
+
+  ast_node_t *lhs = (*root)->as.expr.binary.lhs;
+  ast_node_t *rhs = (*root)->as.expr.binary.rhs;
+  token_type_t op = (*root)->as.expr.operator_type;
+
+  switch (op) {
+  case TOK_ADD:
+    if (lhs->as.literal.type == TYPE_INT && rhs->as.literal.type == TYPE_INT) {
+      token.type = TOK_INT;
+      token.value.int_value =
+          lhs->as.literal.int_value + rhs->as.literal.int_value;
+    } else if (is_numeric_literal(lhs) && is_numeric_literal(rhs)) {
+      token.type = TOK_FLOAT;
+      token.value.double_value =
+          literal_as_double(lhs) + literal_as_double(rhs);
+    } else if (lhs->as.literal.type == TYPE_STRING &&
+               rhs->as.literal.type == TYPE_STRING) {
+      // Zřetězení řetězcových literálů operátorem +
+      token.type = TOK_STRING;
+      size_t len_lhs = strlen(lhs->as.literal.str_value);
+      size_t len_rhs = strlen(rhs->as.literal.str_value);
+      token.value.str_value = malloc(len_lhs + len_rhs + 1);
+      CHECK_MEM_ERR(token.value.str_value);
+      strcpy(token.value.str_value, lhs->as.literal.str_value);
+      strcat(token.value.str_value, rhs->as.literal.str_value);
+    } else {
+      // Nelze bezpečně složit (např. Bool + Bool), necháme na sémantice
+      return IFJ_SUCCESS;
+    }
+    break;
+
+  case TOK_SUB:
+    if (lhs->as.literal.type == TYPE_INT && rhs->as.literal.type == TYPE_INT) {
+      token.type = TOK_INT;
+      token.value.int_value =
+          lhs->as.literal.int_value - rhs->as.literal.int_value;
+    } else if (is_numeric_literal(lhs) && is_numeric_literal(rhs)) {
+      token.type = TOK_FLOAT;
+      token.value.double_value =
+          literal_as_double(lhs) - literal_as_double(rhs);
+    } else {
+      return IFJ_SUCCESS; // Nelze složit nečíselné typy
+    }
+    break;
+
+  case TOK_MUL:
+    if (lhs->as.literal.type == TYPE_INT && rhs->as.literal.type == TYPE_INT) {
+      token.type = TOK_INT;
+      token.value.int_value =
+          lhs->as.literal.int_value * rhs->as.literal.int_value;
+    } else if (is_numeric_literal(lhs) && is_numeric_literal(rhs)) {
+      token.type = TOK_FLOAT;
+      token.value.double_value =
+          literal_as_double(lhs) * literal_as_double(rhs);
+    } else {
+      return IFJ_SUCCESS; // Nelze složit nečíselné typy
+    }
+    break;
+
+  case TOK_DIV:
+    // Dělení nulou nelze složit - chybu hlásí sémantická analýza
+    if ((rhs->as.literal.type == TYPE_INT && rhs->as.literal.int_value == 0) ||
+        (rhs->as.literal.type == TYPE_DOUBLE &&
+         rhs->as.literal.double_value == 0.0)) {
+      return IFJ_SUCCESS;
+    }
+    if (lhs->as.literal.type == TYPE_INT && rhs->as.literal.type == TYPE_INT) {
+      token.type = TOK_INT;
+      token.value.int_value =
+          lhs->as.literal.int_value / rhs->as.literal.int_value;
+    } else if (is_numeric_literal(lhs) && is_numeric_literal(rhs)) {
+      token.type = TOK_FLOAT;
+      token.value.double_value =
+          literal_as_double(lhs) / literal_as_double(rhs);
+    } else {
+      return IFJ_SUCCESS; // Nelze složit nečíselné typy
+    }
+    break;
+
+  case TOK_EQ:
+  case TOK_NEQ:
+  case TOK_LT:
+  case TOK_LEQ:
+  case TOK_GT:
+  case TOK_GEQ: {
+    // Porovnání složíme pro číselné literály a pro == a != na Bool
+    // literálech; řetězce necháváme na sémantické analýze
+    bool result = false;
+    data_type_t ltype = lhs->as.literal.type;
+    data_type_t rtype = rhs->as.literal.type;
+
+    if (ltype == TYPE_STRING || rtype == TYPE_STRING) {
+      return IFJ_SUCCESS; // Porovnání řetězců neskládáme
+    }
+
+    if (ltype == TYPE_BOOL || rtype == TYPE_BOOL) {
+      // Bool lze složit pouze přes == a != na dvou Bool literálech
+      if ((op != TOK_EQ && op != TOK_NEQ) || ltype != TYPE_BOOL ||
+          rtype != TYPE_BOOL) {
+        return IFJ_SUCCESS;
+      }
+
+      if (op == TOK_EQ) {
+        result = (lhs->as.literal.bool_value == rhs->as.literal.bool_value);
+      } else if (op == TOK_NEQ) {
+        result = (lhs->as.literal.bool_value != rhs->as.literal.bool_value);
+      }
+    } else if (ltype == TYPE_INT && rtype == TYPE_INT) {
+      // Celá čísla porovnáváme přímo, bez ztráty přesnosti převodem na double
+      int64_t lval = lhs->as.literal.int_value;
+      int64_t rval = rhs->as.literal.int_value;
+
+      switch (op) {
+      case TOK_EQ:
+        result = (lval == rval);
+        break;
+      case TOK_NEQ:
+        result = (lval != rval);
+        break;
+      case TOK_LT:
+        result = (lval < rval);
+        break;
+      case TOK_LEQ:
+        result = (lval <= rval);
+        break;
+      case TOK_GT:
+        result = (lval > rval);
+        break;
+      case TOK_GEQ:
+        result = (lval >= rval);
+        break;
+      default:
+        break;
+      }
+    } else if (is_numeric_literal(lhs) && is_numeric_literal(rhs)) {
+      // Smíšené Int/Double porovnáváme jako double
+      double lval = literal_as_double(lhs);
+      double rval = literal_as_double(rhs);
+
+      switch (op) {
+      case TOK_EQ:
+        result = (lval == rval);
+        break;
+      case TOK_NEQ:
+        result = (lval != rval);
+        break;
+      case TOK_LT:
+        result = (lval < rval);
+        break;
+      case TOK_LEQ:
+        result = (lval <= rval);
+        break;
+      case TOK_GT:
+        result = (lval > rval);
+        break;
+      case TOK_GEQ:
+        result = (lval >= rval);
+        break;
+      default:
+        break;
+      }
+    } else {
+      return IFJ_SUCCESS; // Např. Unit, neskládáme
+    }
+
+    token.type = TOK_KEYWORD;
+    token.value.keyword = result ? KW_TRUE : KW_FALSE;
+    break;
+  }
+
+  case TOK_AND:
+  case TOK_OR: {
+    // Logické operace složíme pouze pro dva Bool literály
+    if (lhs->as.literal.type != TYPE_BOOL ||
+        rhs->as.literal.type != TYPE_BOOL) {
+      return IFJ_SUCCESS;
+    }
+
+    bool result;
+    if (op == TOK_AND) {
+      result = lhs->as.literal.bool_value && rhs->as.literal.bool_value;
+    } else {
+      result = lhs->as.literal.bool_value || rhs->as.literal.bool_value;
+    }
+
+    token.type = TOK_KEYWORD;
+    token.value.keyword = result ? KW_TRUE : KW_FALSE;
+    break;
+  }
+
+  default:
+    // Ostatní operátory (tečka, rozsahy to/until, ++ na nelistových
+    // operandech, ...) neskládáme
+    return IFJ_SUCCESS;
+  }
+
+  err = create_ast_literal(&token, &folded_node, true);
+  // Pro řetězce si create_ast_literal vytváří vlastní kopii (strdup),
+  // takže dočasný buffer musíme uvolnit
+  if (token.type == TOK_STRING && token.value.str_value != NULL) {
+    free(token.value.str_value);
+    token.value.str_value = NULL;
+  }
+  CHECK_ERR_LOG_RET(err, "Failed to create AST literal for constant folding");
+
+  ast_free(*root);
+  *root = folded_node;
+
+  return IFJ_SUCCESS;
 }
 
 /**
@@ -914,7 +1303,7 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser) {
     case TOK_FLOAT:
     case TOK_STRING:
     case TOK_NULL:
-      err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
+      err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node, false);
       CHECK_ERR_LOG_GOTO(err, cleanup,
                          "Failed to create AST literal from token");
       break;
@@ -922,7 +1311,7 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser) {
     case TOK_KEYWORD:
       if (reduce_nodes[0]->token->value.keyword == KW_TRUE ||
           reduce_nodes[0]->token->value.keyword == KW_FALSE) {
-        err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node);
+        err = create_ast_literal(reduce_nodes[0]->token, &new_ast_node, false);
         CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to create AST literal from token");
       } else if (reduce_nodes[0]->token->value.keyword == KW_LIST) {
@@ -964,12 +1353,34 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser) {
                                  &reduce_nodes[2]->ast_node,
                                  &reduce_nodes[0]->ast_node, &new_ast_node);
     CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to create AST binary expression");
+
+    // Konstantní složení binárního výrazu - složit lze jen výrazy nad dvěma
+    // literály, nebo zřetězení seznamů List(...) ++ List(...). Id volání
+    // smíme číst až po kontrole typu AST_FUNC_CALL u obou operandů, jinak
+    // bychom četli špatný člen union (pád např. u "1 + x" nebo ".head").
+    if ((new_ast_node->as.expr.binary.lhs->type == AST_LITERAL &&
+         new_ast_node->as.expr.binary.rhs->type == AST_LITERAL) ||
+        (new_ast_node->as.expr.operator_type == TOK_CONCAT &&
+         new_ast_node->as.expr.binary.lhs->type == AST_FUNC_CALL &&
+         new_ast_node->as.expr.binary.rhs->type == AST_FUNC_CALL &&
+         strcmp(new_ast_node->as.expr.binary.lhs->as.func_call.id, "List") ==
+             0 &&
+         strcmp(new_ast_node->as.expr.binary.rhs->as.func_call.id, "List") ==
+             0)) {
+      err = constant_fold_binary(&new_ast_node);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to fold binary expression");
+    }
   } else if (reduce_count == 3 && reduce_nodes[0]->symbol == PSA_NONTERM &&
              reduce_nodes[1]->symbol == PSA_UNARY) {
     // Pravidlo 4: E -> op E
     err = create_ast_unary_expr(reduce_nodes[1]->token,
                                 &reduce_nodes[0]->ast_node, &new_ast_node);
     CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to create AST unary expression");
+
+    if (new_ast_node->as.expr.unary.operand->type == AST_LITERAL) {
+      err = constant_fold_unary(&new_ast_node);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to fold unary expression");
+    }
   } else {
     err = IFJ_ESYNTAX;
     LOG_ERR(err,
@@ -983,8 +1394,9 @@ static IFJ_ERR psa_reduce(stack_t *stack, parser_t *parser) {
   // ast, a jeho vložení na zásobník
   push_node = create_psa_stack_node(PSA_NONTERM, new_ast_node, NULL);
   if (!push_node) {
-    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed");
-    goto cleanup;
+    err = IFJ_EINTERNAL;
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to create stack node for non-terminal E");
   }
   new_ast_node = NULL; // Vlastnictví AST uzlu přešlo na push_node
   err = stack_push(stack, (void *)push_node);
