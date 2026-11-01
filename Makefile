@@ -55,7 +55,12 @@ test: $(TEST_TARGETS)
 		$(VALGRIND) ./$$test || exit 1;\
 	done
 
-$(TEST_TARGETS): utest_%: ./tests/utest/test_%.o $(TEST_SRCS_OBJS)
+# test_psa mockuje scanner_next_token a scanner_peek_next_token náhradou
+# symbolů při linkování (GNU ld --wrap), proto má vlastní linkovací pravidlo
+utest_psa: ./tests/utest/test_psa.o $(TEST_SRCS_OBJS)
+	$(CC) $(CFLAGS) $^ -o $@ $(TEST_LDLIBS) -Wl,--wrap=scanner_next_token -Wl,--wrap=scanner_peek_next_token
+
+$(filter-out utest_psa,$(TEST_TARGETS)): utest_%: ./tests/utest/test_%.o $(TEST_SRCS_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(TEST_LDLIBS)
 
 test-format:
