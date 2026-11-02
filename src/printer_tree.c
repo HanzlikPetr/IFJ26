@@ -133,7 +133,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
     printf("\033[1;34m[FUNC]\033[0m %s\"%s\" -> ",
            node->as.func.main ? "@main " : "",
            node->as.func.id ? node->as.func.id : "NULL");
-    print_ifj_type(node->as.func.return_type);
+    print_ifj_type(&node->as.func.return_type);
     printf("\n");
     for (size_t i = 0; i < node->as.func.param_lists_cnt; i++) {
       ast_print_node(node->as.func.param_lists[i], next_prefix, false,
@@ -154,7 +154,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
   case AST_PARAM:
     printf("\033[0;36m[PARAM]\033[0m \"%s\" : ",
            node->as.param.id ? node->as.param.id : "NULL");
-    print_ifj_type(node->as.param.param_type);
+    print_ifj_type(&node->as.param.param_type);
     printf("\n");
     break;
 
@@ -171,7 +171,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
     printf(
         "\033[1;32m[DEF]\033[0m %s \"%s\" : ", node->as.def.mut ? "var" : "val",
         node->as.def.id ? node->as.def.id : "NULL");
-    print_ifj_type(node->as.def.type);
+    print_ifj_type(&node->as.def.type);
     printf("\n");
     ast_print_node(node->as.def.rhs, next_prefix, true, "rhs");
     break;
