@@ -23,11 +23,20 @@
 # interpret ic26int, spustí se i vygenerovaný kód a ověří se jeho návratový
 # kód (0 / 40) a případně výstup podle souboru .out.
 #
-# Proměnné prostředí: COMPILER (výchozí ./ifj26), INTERPRET (výchozí ic26int).
+# Každý test se navíc přeloží i pod Valgrindem (pokud je nainstalovaný)
+# a únik paměti nebo jiná chyba paměti test shodí. Valgrind se dá vypnout
+# proměnnou VALGRIND=0.
+#
+# Proměnné prostředí: COMPILER (výchozí ./ifj26), INTERPRET (výchozí ic26int),
+# VALGRIND (výchozí 1).
 
 COMPILER=${COMPILER:-./ifj26}
 INTERPRET=${INTERPRET:-ic26int}
+VALGRIND=${VALGRIND:-1}
 DIR="$(dirname "$0")/../data"
+
+# Návratový kód Valgrindu při chybě paměti, nesmí kolidovat s kódy překladače.
+VALGRIND_ERR=100
 
 if [ ! -x "$COMPILER" ]; then
   echo "Překladač $COMPILER neexistuje, nejdřív spusť make."
@@ -39,18 +48,37 @@ if command -v "$INTERPRET" >/dev/null 2>&1; then
   HAVE_INTERPRET=1
 fi
 
+HAVE_VALGRIND=0
+if [ "$VALGRIND" != 0 ] && command -v valgrind >/dev/null 2>&1; then
+  HAVE_VALGRIND=1
+fi
+
 TMP_CODE=$(mktemp)
 TMP_OUT=$(mktemp)
-trap 'rm -f "$TMP_CODE" "$TMP_OUT"' EXIT
+TMP_VG=$(mktemp)
+trap 'rm -f "$TMP_CODE" "$TMP_OUT" "$TMP_VG"' EXIT
 
 pass=0
 fail=0
 skip=0
+mem_fail=0
 
 for test in "$DIR"/*/*.ifj; do
   category=$(basename "$(dirname "$test")")
   expected=${category%%_*}
   name="$category/$(basename "$test")"
+
+  # Kontrola paměti překladače pod Valgrindem
+  if [ "$HAVE_VALGRIND" -eq 1 ]; then
+    valgrind --quiet --leak-check=full --track-origins=yes \
+      --error-exitcode="$VALGRIND_ERR" "$COMPILER" <"$test" \
+      >/dev/null 2>"$TMP_VG"
+    if [ $? -eq "$VALGRIND_ERR" ]; then
+      echo "FAIL $name: Valgrind našel chybu paměti:"
+      sed 's/^/    /' "$TMP_VG"
+      mem_fail=$((mem_fail + 1))
+    fi
+  fi
 
   "$COMPILER" <"$test" >"$TMP_CODE" 2>/dev/null
   rc=$?
@@ -100,4 +128,9 @@ done
 
 echo ""
 echo "Prošlo: $pass, selhalo: $fail, přeskočeno (chybí $INTERPRET): $skip"
-[ "$fail" -eq 0 ]
+if [ "$HAVE_VALGRIND" -eq 1 ]; then
+  echo "Chyby paměti (Valgrind): $mem_fail"
+else
+  echo "Valgrind se nespouštěl (není nainstalovaný nebo VALGRIND=0)."
+fi
+[ "$fail" -eq 0 ] && [ "$mem_fail" -eq 0 ]
