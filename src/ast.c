@@ -5,9 +5,10 @@
  * @author xgleton00 Ondřej Glet
  */
 
+#include <stdlib.h>
+
 #include "ast.h"
 #include "error.h"
-#include <stdlib.h>
 
 IFJ_ERR ast_create_node(ast_node_t **node, ast_node_type_t type) {
   CHECK_ARG_NULL_RET(node);
@@ -17,10 +18,20 @@ IFJ_ERR ast_create_node(ast_node_t **node, ast_node_type_t type) {
   CHECK_MEM_ERR(*node);
 
   (*node)->type = type;
+  (*node)->inferred_type.type = TYPE_UNRESOLVED;
+  (*node)->inferred_type.is_list = false;
 
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Přidá uzel na konec dynamického pole uzlů.
+ *
+ * @param arr Ukazatel na dynamické pole uzlů.
+ * @param cnt Ukazatel na počet prvků v poli.
+ * @param child Uzel, který se má přidat.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
 static IFJ_ERR ast_array_append(ast_node_t ***arr, size_t *cnt,
                                 ast_node_t *child) {
   ast_node_t **tmp = realloc(*arr, sizeof(ast_node_t *) * (*cnt + 1));
@@ -147,7 +158,6 @@ void ast_free(ast_node_t *root) {
       ast_free(root->as.func.param_lists[i]);
     }
     free(root->as.func.param_lists);
-    free(root->as.func.return_type);
     ast_free(root->as.func.body);
     break;
 
@@ -164,7 +174,6 @@ void ast_free(ast_node_t *root) {
 
   case AST_PARAM:
     free(root->as.param.id);
-    free(root->as.param.param_type);
     break;
 
   case AST_BLOCK:
@@ -176,7 +185,6 @@ void ast_free(ast_node_t *root) {
 
   case AST_DEF:
     free(root->as.def.id);
-    free(root->as.def.type);
     ast_free(root->as.def.rhs);
     break;
 
