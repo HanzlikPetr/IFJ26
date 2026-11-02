@@ -36,7 +36,7 @@ jobs:
         run: |
           find . -type f \( -name "*.c" -o -name "*.h" \) \
             -exec clang-format --style=file --dry-run --Werror {} +
-  test:
+  test-unit:
     name: Run Tests
     runs-on: ubuntu-latest
     steps:
@@ -50,3 +50,16 @@ jobs:
 
       - name: Compile and run tests
         run: make test
+  test-systest:
+    name: Run System Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Compile and run system tests
+        run: make test-systest
