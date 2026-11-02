@@ -377,8 +377,6 @@ static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast,
 
   new_ast_node->type = AST_LITERAL;
   new_ast_node->as.literal.is_folded = is_folded;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
 
   switch (token->type) {
   case TOK_INT:
@@ -445,8 +443,6 @@ static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
   CHECK_MEM_ERR(new_ast_node);
 
   new_ast_node->type = AST_VAR;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
 
   if (token->type == TOK_ID) {
     new_ast_node->as.var.id = strdup(token->value.str_value);
@@ -498,8 +494,6 @@ static IFJ_ERR create_ast_binary_expr(token_t *operator_token, ast_node_t **lhs,
   new_ast_node->as.expr.is_unary = false;
   new_ast_node->as.expr.binary.lhs = *lhs;
   new_ast_node->as.expr.binary.rhs = *rhs;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
 
   // Předání vlastnictví AST uzlů a nastavení původních ukazatelů na NULL
   *lhs = NULL;
@@ -528,8 +522,6 @@ static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
   new_ast_node->as.expr.is_unary = true;
   new_ast_node->as.expr.operator_type = operator_token->type;
   new_ast_node->as.expr.unary.operand = *operand;
-  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
-  new_ast_node->inferred_type.is_list = false;
 
   // Předání vlastnictví AST uzlu a nastavení původního ukazatele na NULL
   *operand = NULL;
@@ -546,8 +538,6 @@ static void init_func_call_ast(ast_node_t *func_call_ast) {
   func_call_ast->type = AST_FUNC_CALL;
   func_call_ast->as.func_call.param_lists = NULL;
   func_call_ast->as.func_call.param_lists_cnt = 0;
-  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
-  func_call_ast->inferred_type.is_list = false;
 }
 
 /**
@@ -558,8 +548,6 @@ static void init_param_list_ast(ast_node_t *param_list_ast) {
   param_list_ast->type = AST_PARAM_LIST;
   param_list_ast->as.param_list.params = NULL;
   param_list_ast->as.param_list.params_cnt = 0;
-  param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
-  param_list_ast->inferred_type.is_list = false;
 }
 
 /**
