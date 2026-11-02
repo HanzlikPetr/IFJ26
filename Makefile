@@ -24,7 +24,7 @@ ALL_DEPS = $(SRCS_OBJS:.o=.d) $(TESTS_OBJS:.o=.d)
 #Vychozi cil je build (spousti se pri pouhem prikazu make)
 .DEFAULT_GOAL := build
 
-.PHONY: all build clean format test
+.PHONY: all build clean format test test-systest
 
 #---------------------------------------------------
 # Pravidla pro kompilaci hlavniho programu
@@ -64,6 +64,12 @@ test-format:
 	@echo ""
 	@ find . -type f \( -name "*.c" -o -name "*.h" \) \
             -exec clang-format --style=file --dry-run --Werror {} +
+
+test-systest: build
+	@echo ""
+	@echo "Running system tests..."
+	@echo ""
+	@./tests/system/run_systests.sh || exit 1
 
 #---------------------------------------------------
 # Pravidlo pro formátování kódu
