@@ -39,8 +39,9 @@ typedef enum {
  */
 #define CHECK_ERR_RET(err)                                                     \
   do {                                                                         \
-    if (CHECK_ERR(err)) {                                                      \
-      return err;                                                              \
+    IFJ_ERR _ifj_err = (err);                                                  \
+    if (CHECK_ERR(_ifj_err)) {                                                 \
+      return _ifj_err;                                                         \
     }                                                                          \
   } while (0)
 
@@ -51,9 +52,10 @@ typedef enum {
  */
 #define CHECK_ERR_LOG_RET(err, ...)                                            \
   do {                                                                         \
-    if (CHECK_ERR(err)) {                                                      \
-      LOG_ERR(err, __VA_ARGS__);                                               \
-      return err;                                                              \
+    IFJ_ERR _ifj_err = (err);                                                  \
+    if (CHECK_ERR(_ifj_err)) {                                                 \
+      LOG_ERR(_ifj_err, __VA_ARGS__);                                          \
+      return _ifj_err;                                                         \
     }                                                                          \
   } while (0)
 
@@ -89,7 +91,8 @@ typedef enum {
  */
 #define CHECK_ERR_GOTO(err, goto_label)                                        \
   do {                                                                         \
-    if (CHECK_ERR(err)) {                                                      \
+    IFJ_ERR _ifj_err = (err);                                                  \
+    if (CHECK_ERR(_ifj_err)) {                                                 \
       goto goto_label;                                                         \
     }                                                                          \
   } while (0)
@@ -102,8 +105,9 @@ typedef enum {
  */
 #define CHECK_ERR_LOG_GOTO(err, goto_label, ...)                               \
   do {                                                                         \
-    if (CHECK_ERR(err)) {                                                      \
-      LOG_ERR(err, __VA_ARGS__);                                               \
+    IFJ_ERR _ifj_err = (err);                                                  \
+    if (CHECK_ERR(_ifj_err)) {                                                 \
+      LOG_ERR(_ifj_err, __VA_ARGS__);                                          \
       goto goto_label;                                                         \
     }                                                                          \
   } while (0)
