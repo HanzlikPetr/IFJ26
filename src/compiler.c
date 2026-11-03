@@ -5,9 +5,26 @@
  * @author xhanzlp00 Petr Hanzlík
  */
 
-#include <stdio.h>
+#include "ast.h"
+#include "parser.h"
+#include "scanner.h"
 
 int main() {
-  printf("Tady bude kompilovat jedna radost!\n");
-  return 0;
+  scanner_t scanner = {0};
+  parser_t parser = {0};
+  ast_node_t *root = NULL;
+  IFJ_ERR err = scanner_init(&scanner);
+  CHECK_ERR_GOTO(err, cleanup);
+
+  err = parser_init(&parser, &scanner);
+  CHECK_ERR_GOTO(err, cleanup);
+
+  err = parser_parse(&parser, &root);
+
+cleanup:
+  ast_free(root);
+  parser_destroy(&parser);
+  scanner_destroy(&scanner);
+
+  return err;
 }
