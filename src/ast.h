@@ -26,7 +26,7 @@ typedef enum {
   AST_BLOCK,      /**< Odsazený blok příkazů */
   AST_EXPR,       /**< Unární nebo binární výraz */
   AST_VAR,        /**< Proměnná */
-  AST_LITERAL,
+  AST_LITERAL,    /**< Literál (např. číslo, řetězec, true, false) */
   AST_DEF,        /**< Definice proměnné var nebo val */
   AST_ASSIGN,     /**< Přiřazení do proměnné */
   AST_IF,         /**< Podmíněná konstrukce if */
@@ -37,7 +37,7 @@ typedef enum {
   AST_FOR_GUARD,  /**< Stráž cyklu for */
   AST_WHILE,      /**< Cyklus while */
   AST_FUNC_RET,   /**< Příkaz návratu z funkce */
-  AST_FUNC_CALL,
+  AST_FUNC_CALL,  /**< Volání funkce */
 } ast_node_type_t;
 
 /**
