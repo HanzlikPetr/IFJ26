@@ -621,3 +621,150 @@ IFJ_ERR symtable_fill_funcitons(symtable_t *table, const ast_node_t *root) {
 
   return IFJ_SUCCESS;
 }
+
+static IFJ_ERR destroy_local_symtable_stack(void *data) {
+  symtable_destroy((symtable_t *)data);
+  free(data);
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR check_function(symtable_t *functions_table,
+                              symtable_data_t *func_data) {
+  CHECK_ARGS_NULL_RET(functions_table, func_data);
+  sem_ctx_t ctx = {0};
+  symtable_t *local_symtable = NULL;
+  IFJ_ERR err = IFJ_SUCCESS;
+  char *code_gen_name = NULL;
+
+  // Funkce již byla zkontrolována, přeskočíme ji
+  if (func_data->func.is_checked) {
+    return IFJ_SUCCESS;
+  }
+
+  // Detekce přímé rekurze: funkce je právě řešena a její návratový typ není
+  // explicitně určen
+  if (func_data->func.is_resolving &&
+      func_data->func.return_type_explicit == false) {
+    CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                      "Indirect recursion detected in function '%s' with "
+                      "unresolved return type.",
+                      func_data->func.node->as.func.id);
+  }
+
+  // TODO: Implementace kontorly neprime rekurze
+
+  func_data->func.is_resolving = true;
+
+  // Inicializace kontextu sémantické analýzy
+  ctx.global_symtable = functions_table;
+  ctx.current_func = &func_data->func;
+  ctx.var_uid_counter = 0;
+  ctx.in_untyped_recursion = false;
+  CHECK_ERR_LOG_RET(
+      stack_init(&ctx.local_scopes),
+      "Failed to initialize local scopes stack for function '%s'.",
+      func_data->func.node->as.func.id);
+
+  // Vytvoření lokální tabulky symbolů pro funkci (parametry a lokální proměnné)
+  local_symtable = malloc(sizeof(symtable_t));
+  CHECK_MEM_ERR(local_symtable);
+
+  err = symtable_init(local_symtable);
+  CHECK_ERR_LOG_GOTO(
+      err, cleanup,
+      "Failed to initialize local symbol table for function '%s'.",
+      func_data->func.node->as.func.id);
+
+  // Vložení parametrů funkce do lokální tabulky symbolů
+  for (int i = 0; i < func_data->func.param_list_count; i++) {
+    param_list_t *param_list = func_data->func.param_list[i];
+    for (int j = 0; j < param_list->count; j++) {
+      // Vložení parametru do lokální tabulky symbolů
+      symtable_data_t param_data = {0};
+      param_data.is_function = false;
+
+      // Velikost pro unikátní jméno proměnné: délka původního jména + 1 (pro
+      // '$') + 10 (pro číslo)
+      code_gen_name =
+          malloc(strlen(func_data->func.node->as.func.param_lists[i]
+                            ->as.param_list.params[j]
+                            ->as.param.id) +
+                 1 + 10);
+      if (code_gen_name == NULL) {
+        CHECK_ERR_LOG_GOTO(
+            IFJ_EINTERNAL, cleanup,
+            "Failed to allocate memory for code generation name.");
+      }
+      sprintf(code_gen_name, "%s$%zu",
+              func_data->func.node->as.func.param_lists[i]
+                  ->as.param_list.params[j]
+                  ->as.param.id,
+              ctx.var_uid_counter++);
+      param_data.var.code_gen_name = code_gen_name;
+
+      param_data.var.type = param_list->types[j];
+      param_data.var.is_mutable = false; // Parametry jsou implicitně neměnné
+      err = symtable_insert(local_symtable,
+                            func_data->func.node->as.func.param_lists[i]
+                                ->as.param_list.params[j]
+                                ->as.param.id,
+                            &param_data);
+      free_symtable_data(
+          &param_data); // Uvolnění alokované paměti pro code_gen_name
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to insert parameter '%s' into local symbol "
+                         "table for function '%s'.",
+                         func_data->func.node->as.func.param_lists[i]
+                             ->as.param_list.params[j]
+                             ->as.param.id,
+                         func_data->func.node->as.func.id);
+    }
+  }
+
+  // Vložení lokální tabulky symbolů do zásobníku lokálních tabulek
+  CHECK_ERR_LOG_RET(
+      stack_push(&ctx.local_scopes, local_symtable),
+      "Failed to push local symbol table onto stack for function '%s'.",
+      func_data->func.node->as.func.id);
+  local_symtable = NULL; // Vlastní tabulka symbolů je nyní spravována
+                         // zásobníkem, aby nedošlo k dvojímu uvolnění
+
+cleanup:
+  func_data->func.is_resolving = false;
+  stack_deep_dtor(&ctx.local_scopes, destroy_local_symtable_stack);
+  return err;
+}
+
+IFJ_ERR check_functions(const ast_node_t *root, symtable_t *functions_table) {
+  CHECK_ARGS_NULL_RET(root, functions_table);
+  symtable_data_t *func_data = NULL;
+
+  if (root->type != AST_ROOT) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid AST root node type: %d", root->type);
+    return IFJ_EINTERNAL;
+  }
+
+  for (size_t i = 0; i < root->as.root.funcs_cnt; i++) {
+    ast_node_t *func_node = root->as.root.funcs[i];
+
+    if (func_node == NULL || func_node->type != AST_FUNC) {
+      CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Invalid AST node type for function: %d",
+                        func_node ? (int)func_node->type : -1);
+    }
+
+    // Získání dat funkce z tabulky symbolů pro kontrolu
+    CHECK_ERR_LOG_RET(
+        symtable_find(functions_table, func_node->as.func.id, &func_data),
+        "Function '%s' not found in symbol table.", func_node->as.func.id);
+
+    if (func_data->func.is_checked) {
+      // Funkce již byla zkontrolována, přeskočíme ji
+      continue;
+    }
+
+    CHECK_ERR_LOG_RET(check_function(functions_table, func_data),
+                      "Failed to check function '%s'.", func_node->as.func.id);
+  }
+
+  return IFJ_SUCCESS;
+}
