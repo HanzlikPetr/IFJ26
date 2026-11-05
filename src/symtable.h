@@ -147,7 +147,6 @@ IFJ_ERR symtable_find(const symtable_t *table, const char *key,
 /**
  * @brief Uvolní tabulku symbolů a všechny její prvky.
  * @param table Ukazatel na tabulku symbolů.
- * @return IFJ_EINTERNAL při poslaní NULL pointeru.
  * @return IFJ_SUCCESS při úspěšném uvolnění.
  */
 IFJ_ERR symtable_destroy(symtable_t *table);

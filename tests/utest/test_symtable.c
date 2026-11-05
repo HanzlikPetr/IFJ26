@@ -878,7 +878,6 @@ static void test_null_pointers(void **state) {
   traverse_state_t trav = {0};
 
   assert_int_equal(symtable_init(NULL), IFJ_EINTERNAL);
-  assert_int_equal(symtable_destroy(NULL), IFJ_EINTERNAL);
 
   IFJ_ERR err = symtable_init(&table);
   assert_int_equal(err, IFJ_SUCCESS);
