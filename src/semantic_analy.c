@@ -5,13 +5,21 @@
  * @author xhanzlp00 Petr Hanzlík
  */
 
-#include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "semantic_analy.h"
 #include "error.h"
+#include "semantic_analy.h"
 #include "symtable.h"
+
+typedef struct {
+  symtable_t *global_symtable; // Globální tabulka funkcí
+  stack_t local_scopes;        // Zásobník lokálních symtable_t* pro bloky
+  func_data_t *current_func;   // Právě analyzovaná funkce
+  size_t var_uid_counter; // Počítadlo pro unikátní jména proměnných (x$1, x$2)
+  bool in_untyped_recursion; // Pomocný flag pro detekci nepřímé rekurze
+} sem_ctx_t;
 
 /**
  * @brief Pomocná funkce pro kontrolu seznamů parametrů.
@@ -150,6 +158,14 @@ static IFJ_ERR create_param_list(int param_count,
 }
 
 /**
+ * @brief Druh vytvářené funkce.
+ */
+typedef enum {
+  FUNC_BUILT_IN, /**< Vestavěná funkce */
+  FUNC_USER_DEFINED, /**< Uživatelem definovaná funkce */
+} func_kind_t;
+
+/**
  * @brief Pomocná funkce pro vytvoření nové funkce a její hlubokou kopii
  *        seznamů parametrů.
  *
@@ -157,18 +173,26 @@ static IFJ_ERR create_param_list(int param_count,
  * nutné je uvolnit pomocí free_symtable_data(). V případě chyby zůstává
  * obsah @p func_data nezměněn.
  *
+ * Flagy a AST uzel se nastavují podle druhu funkce:
+ * - FUNC_BUILT_IN: všechny flagy true, node je NULL.
+ * - FUNC_USER_DEFINED: return_type_explicit podle návratového typu,
+ *   ostatní flagy false, node ukazuje na AST uzel funkce.
+ *
  * @param name Název funkce.
  * @param return_type Návratový typ funkce.
+ * @param kind Druh funkce (vestavěná nebo uživatelem definovaná).
  * @param param_list_count Počet seznamů parametrů.
  * @param param_lists Pole ukazatelů na seznamy parametrů.
+ * @param node AST uzel funkce (použit pouze u FUNC_USER_DEFINED).
  * @param func_data Ukazatel na novou funkci.
  * @return IFJ_EINTERNAL při chybě alokace paměti nebo poslání NULL pointeru.
  * @return IFJ_SUCCESS při úspěšném vytvoření funkce.
  */
 static IFJ_ERR create_function(const char *name, const ifj26_type_t return_type,
+                               const func_kind_t kind,
                                const int param_list_count,
                                param_list_t *const *param_lists,
-                               symtable_data_t *func_data) {
+                               ast_node_t *node, symtable_data_t *func_data) {
   CHECK_ARGS_NULL_RET(name, func_data);
 
   symtable_data_t data = {0};
@@ -177,11 +201,33 @@ static IFJ_ERR create_function(const char *name, const ifj26_type_t return_type,
 
   data.is_function = true;
   data.func.return_type = return_type;
-  data.func.return_type_explicit = true;
-  data.func.has_return_stmt = true;
-  data.func.body = NULL;
   data.func.param_list_count = param_list_count;
   data.func.param_list = NULL;
+
+  // Flagy a AST uzel se nastavují podle druhu funkce
+  switch (kind) {
+  case FUNC_BUILT_IN:
+    // Vestavěné funkce jsou plně vyřešené a nemají tělo v AST
+    data.func.return_type_explicit = true;
+    data.func.is_resolving = true;
+    data.func.is_checked = true;
+    data.func.has_return_stmt = true;
+    data.func.node = NULL;
+    break;
+
+  case FUNC_USER_DEFINED:
+    // Uživatelem definované funkce se teprve budou analyzovat
+    data.func.return_type_explicit = return_type.type != TYPE_UNRESOLVED;
+    data.func.is_resolving = false;
+    data.func.is_checked = false;
+    data.func.has_return_stmt = false;
+    data.func.node = node;
+    break;
+
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Invalid function kind: %d", (int)kind);
+    return IFJ_EINTERNAL;
+  }
 
   if (param_list_count > 0) {
     // Alokace paměti pro pole ukazatelů na seznamy parametrů
@@ -222,8 +268,9 @@ static IFJ_ERR insert_built_in_function(symtable_t *table, const char *name,
                                         param_list_t *const *param_lists) {
   symtable_data_t func_data = {0};
 
-  IFJ_ERR err = create_function(name, return_type, param_list_count,
-                                param_lists, &func_data);
+  IFJ_ERR err =
+      create_function(name, return_type, FUNC_BUILT_IN, param_list_count,
+                      param_lists, NULL, &func_data);
   CHECK_ERR_LOG_RET(err, "Failed to create built-in function '%s'.", name);
 
   err = symtable_insert(table, name, &func_data);
@@ -386,6 +433,68 @@ static IFJ_ERR create_param_list_from_ast(const ast_node_t *param_list_node,
 }
 
 /**
+ * @brief Pomocná funkce pro kontrolu duplicitních názvů parametrů funkce.
+ *
+ * Kontroluje, zda mají všechny parametry funkce napříč všemi seznamy
+ * parametrů unikátní názvy.
+ *
+ * @param func_node AST uzel funkce (AST_FUNC).
+ * @return IFJ_ESEM_REDEF při duplicitním názvu parametru.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatném AST uzlu.
+ * @return IFJ_SUCCESS při úspěšné kontrole.
+ */
+static IFJ_ERR check_param_names_unique(const ast_node_t *func_node) {
+  CHECK_ARGS_NULL_RET(func_node);
+
+  if (func_node->type != AST_FUNC) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type: %d (expected AST_FUNC)",
+            func_node->type);
+    return IFJ_EINTERNAL;
+  }
+
+  size_t lists_cnt = func_node->as.func.param_lists_cnt;
+
+  for (size_t i = 0; i < lists_cnt; i++) {
+    const ast_node_t *list_i = func_node->as.func.param_lists[i];
+
+    if (list_i == NULL || list_i->type != AST_PARAM_LIST) {
+      LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type for parameter list: %d",
+              list_i ? (int)list_i->type : -1);
+      return IFJ_EINTERNAL;
+    }
+
+    for (size_t j = 0; j < list_i->as.param_list.params_cnt; j++) {
+      const ast_node_t *param_i = list_i->as.param_list.params[j];
+
+      if (param_i == NULL || param_i->type != AST_PARAM ||
+          param_i->as.param.id == NULL) {
+        LOG_ERR(IFJ_EINTERNAL, "Invalid AST node for parameter");
+        return IFJ_EINTERNAL;
+      }
+
+      // Porovnání se všemi předchozími parametry napříč seznamy
+      for (size_t k = 0; k <= i; k++) {
+        const ast_node_t *list_k = func_node->as.func.param_lists[k];
+        size_t params_cnt_k = (k == i) ? j : list_k->as.param_list.params_cnt;
+
+        for (size_t l = 0; l < params_cnt_k; l++) {
+          const ast_node_t *param_k = list_k->as.param_list.params[l];
+
+          if (strcmp(param_i->as.param.id, param_k->as.param.id) == 0) {
+            LOG_ERR(IFJ_ESEM_REDEF,
+                    "Duplicate parameter name '%s' in function '%s'.",
+                    param_i->as.param.id, func_node->as.func.id);
+            return IFJ_ESEM_REDEF;
+          }
+        }
+      }
+    }
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
  * @brief Pomocná funkce pro naplnění tabulky symbolů uživatelskými funkcemi.
  * @param table Ukazatel na tabulku symbolů.
  * @param root Ukazatel na kořen AST stromu.
@@ -415,8 +524,32 @@ static IFJ_ERR symtable_fill_user_defined_functions(symtable_t *table,
     }
 
     if (func_node->as.func.main) {
-        has_main_function = true;
+      // Kontrola, zda již byla definována hlavní funkce
+      if (has_main_function) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_REDEF,
+                          "Multiple @main functions defined in user-defined "
+                          "functions.");
+      }
+
+      // Nastavení flagu, že byla nalezena hlavní funkce
+      has_main_function = true;
+
+      if (func_node->as.func.return_type.type != TYPE_UNIT ||
+          func_node->as.func.return_type.is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "Main function must have return type Unit.");
+      }
+
+      if (func_node->as.func.param_lists_cnt != 1 ||
+          func_node->as.func.param_lists[0]->as.param_list.params_cnt != 0) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "Main function must have no parameters.");
+      }
     }
+
+    // Kontrola duplicitních názvů parametrů napříč všemi seznamy parametrů
+    err = check_param_names_unique(func_node);
+    CHECK_ERR_RET(err);
 
     // Převod seznamů parametrů z AST na pole ukazatelů na seznamy parametrů
     size_t lists_cnt = func_node->as.func.param_lists_cnt;
@@ -441,7 +574,8 @@ static IFJ_ERR symtable_fill_user_defined_functions(symtable_t *table,
 
     symtable_data_t func_data = {0};
     err = create_function(func_node->as.func.id, func_node->as.func.return_type,
-                          (int)lists_cnt, lists, &func_data);
+                          FUNC_USER_DEFINED, (int)lists_cnt, lists, func_node,
+                          &func_data);
     if (CHECK_ERR(err)) {
       free_param_lists(lists, (int)lists_cnt);
       CHECK_ERR_LOG_RET(err, "Failed to create user-defined function '%s'.",
@@ -467,12 +601,12 @@ static IFJ_ERR symtable_fill_user_defined_functions(symtable_t *table,
   }
 
   if (!has_main_function) {
-    CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF, "Missing 'main' function in user-defined functions.");
+    CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF,
+                      "Missing 'main' function in user-defined functions.");
   }
 
   return err;
 }
-
 
 IFJ_ERR symtable_fill_funcitons(symtable_t *table, const ast_node_t *root) {
   CHECK_ARGS_NULL_RET(table, root);
@@ -484,7 +618,6 @@ IFJ_ERR symtable_fill_funcitons(symtable_t *table, const ast_node_t *root) {
   err = symtable_fill_user_defined_functions(table, root);
   CHECK_ERR_LOG_RET(err,
                     "Failed to fill symbol table with user-defined functions");
-
 
   return IFJ_SUCCESS;
 }
