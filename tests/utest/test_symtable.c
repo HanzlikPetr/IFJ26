@@ -3,6 +3,11 @@
  * @brief IFJ26 - Unit testy pro tabulku symbolů (cmocka)
  *
  * @author xhanzlp00 Petr Hanzlík
+ * Tests (v5) created from the following prompt (model: GLM-5.3 via opencode):
+ *
+ * "rewrite test based on changes in symtable.c and symtable.h"
+ *
+ * --------------------------------------------------------------------------
  * Tests (v4) created from the following prompt (model: GLM-5.3 via opencode):
  *
  * "rewrite test that have wrong function parametrs, change check from NULL
@@ -211,27 +216,32 @@ static symtable_data_t make_func_data(int param_list_count,
   data.func.return_type.is_list = true;
   data.func.return_type_explicit = true;
   data.func.is_resolving = false;
-  data.func.is_main = false;
+  data.func.is_checked = false;
+  data.func.has_return_stmt = false;
+  data.func.node = NULL;
   data.func.param_list_count = param_list_count;
 
   if (param_list_count > 0) {
-    data.func.params = malloc(sizeof(param_list_t) * (size_t)param_list_count);
-    assert_non_null(data.func.params);
+    data.func.param_list =
+        malloc(sizeof(param_list_t *) * (size_t)param_list_count);
+    assert_non_null(data.func.param_list);
     for (int i = 0; i < param_list_count; i++) {
-      data.func.params[i].count = list_counts[i];
+      data.func.param_list[i] = malloc(sizeof(param_list_t));
+      assert_non_null(data.func.param_list[i]);
+      data.func.param_list[i]->count = list_counts[i];
       if (list_counts[i] > 0) {
-        data.func.params[i].types =
+        data.func.param_list[i]->types =
             malloc(sizeof(ifj26_type_t) * (size_t)list_counts[i]);
-        assert_non_null(data.func.params[i].types);
+        assert_non_null(data.func.param_list[i]->types);
         for (int t = 0; t < list_counts[i]; t++) {
-          data.func.params[i].types[t] = expected_type((size_t)t);
+          data.func.param_list[i]->types[t] = expected_type((size_t)t);
         }
       } else {
-        data.func.params[i].types = NULL;
+        data.func.param_list[i]->types = NULL;
       }
     }
   } else {
-    data.func.params = NULL;
+    data.func.param_list = NULL;
   }
 
   return data;
@@ -243,12 +253,13 @@ static symtable_data_t make_func_data(int param_list_count,
  * @param data Data funkce k uvolneni.
  */
 static void free_func_data(symtable_data_t *data) {
-  if (data->func.params != NULL) {
+  if (data->func.param_list != NULL) {
     for (int i = 0; i < data->func.param_list_count; i++) {
-      free(data->func.params[i].types);
+      free(data->func.param_list[i]->types);
+      free(data->func.param_list[i]);
     }
-    free(data->func.params);
-    data->func.params = NULL;
+    free(data->func.param_list);
+    data->func.param_list = NULL;
   }
 }
 
@@ -266,26 +277,29 @@ static void verify_func_data(const symtable_data_t *found, int param_list_count,
   assert_true(found->func.return_type.is_list);
   assert_true(found->func.return_type_explicit);
   assert_false(found->func.is_resolving);
-  assert_false(found->func.is_main);
+  assert_false(found->func.is_checked);
+  assert_false(found->func.has_return_stmt);
+  assert_null(found->func.node);
   assert_int_equal(found->func.param_list_count, param_list_count);
 
   if (param_list_count == 0) {
-    assert_null(found->func.params);
+    assert_null(found->func.param_list);
     return;
   }
 
-  assert_non_null(found->func.params);
+  assert_non_null(found->func.param_list);
   for (int i = 0; i < param_list_count; i++) {
-    assert_int_equal(found->func.params[i].count, list_counts[i]);
+    assert_non_null(found->func.param_list[i]);
+    assert_int_equal(found->func.param_list[i]->count, list_counts[i]);
     if (list_counts[i] == 0) {
-      assert_null(found->func.params[i].types);
+      assert_null(found->func.param_list[i]->types);
       continue;
     }
-    assert_non_null(found->func.params[i].types);
+    assert_non_null(found->func.param_list[i]->types);
     for (int t = 0; t < list_counts[i]; t++) {
       ifj26_type_t exp = expected_type((size_t)t);
-      assert_int_equal(found->func.params[i].types[t].type, exp.type);
-      assert_true(found->func.params[i].types[t].is_list == exp.is_list);
+      assert_int_equal(found->func.param_list[i]->types[t].type, exp.type);
+      assert_true(found->func.param_list[i]->types[t].is_list == exp.is_list);
     }
   }
 }
@@ -465,8 +479,9 @@ static void test_deep_copy_semantics(void **state) {
   const int list_counts[] = {2, 0};
 
   symtable_data_t data = make_func_data(2, list_counts);
-  param_list_t *caller_params = data.func.params;
-  ifj26_type_t *caller_types = data.func.params[0].types;
+  param_list_t **caller_params = data.func.param_list;
+  param_list_t *caller_list0 = data.func.param_list[0];
+  ifj26_type_t *caller_types = data.func.param_list[0]->types;
 
   IFJ_ERR err = symtable_insert(&ts->table, "fn", &data);
   assert_int_equal(err, IFJ_SUCCESS);
@@ -474,8 +489,9 @@ static void test_deep_copy_semantics(void **state) {
 
   symtable_data_t *found = find_key(&ts->table, "fn");
   verify_func_data(found, 2, list_counts);
-  assert_true(found->func.params != caller_params);
-  assert_true(found->func.params[0].types != caller_types);
+  assert_true(found->func.param_list != caller_params);
+  assert_true(found->func.param_list[0] != caller_list0);
+  assert_true(found->func.param_list[0]->types != caller_types);
 
   symtable_data_t vdata = make_var_data(TYPE_STRING, true, false, "LF@s");
   char *caller_cgn = vdata.var.code_gen_name;
@@ -520,12 +536,12 @@ static void test_find_mutable_pointer(void **state) {
 static void test_invalid_func_data(void **state) {
   test_state_t *ts = (test_state_t *)*state;
 
-  // Varianta 1: param_list_count > 0, ale params je NULL
+  // Varianta 1: param_list_count > 0, ale param_list je NULL
   symtable_data_t data = {0};
   data.is_function = true;
   data.func.return_type.type = TYPE_UNIT;
   data.func.param_list_count = 2;
-  data.func.params = NULL;
+  data.func.param_list = NULL;
 
   IFJ_ERR err = symtable_insert(&ts->table, "bad", &data);
   assert_int_equal(err, IFJ_EINTERNAL);
@@ -543,17 +559,36 @@ static void test_invalid_func_data(void **state) {
   bad_list.count = 3;
   bad_list.types = NULL;
 
+  param_list_t *bad_lists[1] = {&bad_list};
+
   symtable_data_t data2 = {0};
   data2.is_function = true;
   data2.func.return_type.type = TYPE_UNIT;
   data2.func.param_list_count = 1;
-  data2.func.params = &bad_list;
+  data2.func.param_list = bad_lists;
 
   err = symtable_insert(&ts->table, "bad_types", &data2);
   assert_int_equal(err, IFJ_EINTERNAL);
 
   // Tabulka zustava pouzitelna, chyby se nepropaguji
   err = symtable_find(&ts->table, "bad_types", &found);
+  assert_int_equal(err, IFJ_ESEM_UNDEF);
+  assert_null(found);
+  assert_non_null(find_key(&ts->table, "ok"));
+
+  // Varianta 3: pole ukazatelu na seznamy parametru obsahuje NULL
+  param_list_t *null_lists[2] = {NULL, NULL};
+
+  symtable_data_t data3 = {0};
+  data3.is_function = true;
+  data3.func.return_type.type = TYPE_UNIT;
+  data3.func.param_list_count = 2;
+  data3.func.param_list = null_lists;
+
+  err = symtable_insert(&ts->table, "bad_null_list", &data3);
+  assert_int_equal(err, IFJ_EINTERNAL);
+
+  err = symtable_find(&ts->table, "bad_null_list", &found);
   assert_int_equal(err, IFJ_ESEM_UNDEF);
   assert_null(found);
   assert_non_null(find_key(&ts->table, "ok"));

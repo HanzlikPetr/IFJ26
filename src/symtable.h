@@ -12,6 +12,8 @@
 
 #include "error.h"
 
+typedef struct ast_node ast_node_t;
+
 /**
  * @brief Struktura pro uzel AVL stromu.
  */
@@ -75,9 +77,13 @@ typedef struct {
                                 = typ je odvozen */
   bool is_resolving; /**< Flag pro detekci cyklu v rekurzi při
                           odvozování typu */
-  bool is_main; /**< Flag, true = funkce je main, false = jiná funkce */
+  bool is_checked; /**< Flag, true = funkce byla zkontrolována, false = funkce
+                      nebyla zkontrolována */
+  bool has_return_stmt; /**< Flag, true = funkce má return statement, false =
+                           funkce nemá return statement */
+  ast_node_t *node; /**< Ukazatel na AST uzel funkce, pokud je k dispozici */
   int param_list_count; /**< Počet seznamu parametrů funkce */
-  param_list_t *params; /**< Pole seznamu parametrů funkce */
+  param_list_t **param_list; /**< Pole ukazatelů na seznamy parametrů funkce */
 } func_data_t;
 
 /**
