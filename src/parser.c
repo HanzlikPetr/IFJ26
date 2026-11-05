@@ -952,6 +952,8 @@ cleanup:
 static IFJ_ERR parse_block_cmd(parser_t *parser, ast_node_t **command) {
   CHECK_ARGS_NULL_RET(parser, command);
 
+  *command = NULL;
+
   if (parser_is_keyword(parser, KW_VAR)) {
     return parse_var_def(parser, command);
   }
@@ -973,7 +975,12 @@ static IFJ_ERR parse_block_cmd(parser_t *parser, ast_node_t **command) {
 
   IFJ_ERR err = parse_assign_or_expr(parser, command);
   CHECK_ERR_RET(err);
-  return parser_expect_type(parser, TOK_EOL);
+  err = parser_expect_type(parser, TOK_EOL);
+  if (err != IFJ_SUCCESS) {
+    ast_free(*command);
+    *command = NULL;
+  }
+  return err;
 }
 
 /**
