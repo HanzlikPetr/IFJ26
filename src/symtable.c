@@ -437,7 +437,9 @@ static void avl_destroy(avl_node_t *root) {
 
 IFJ_ERR symtable_destroy(symtable_t *table) {
   // Kontrola proti NULL pointeru
-  CHECK_ARGS_NULL_RET(table);
+  if (!table) {
+    return IFJ_SUCCESS;
+  }
 
   // Uvolnění stromu
   avl_destroy(table->root);
