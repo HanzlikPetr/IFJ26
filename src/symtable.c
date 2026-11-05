@@ -32,6 +32,26 @@ IFJ_ERR symtable_init(symtable_t *table) {
 }
 
 /**
+ * @brief Pomocná funkce pro uvolnění pole ukazatelů na seznamy parametrů.
+ * @param func Ukazatel na data funkce.
+ */
+static void free_param_lists(func_data_t *func) {
+  if (func == NULL || func->param_list == NULL) {
+    return;
+  }
+
+  for (int i = 0; i < func->param_list_count; i++) {
+    if (func->param_list[i]) {
+      free(func->param_list[i]->types);
+      free(func->param_list[i]);
+    }
+  }
+
+  free(func->param_list);
+  func->param_list = NULL;
+}
+
+/**
  * @brief Pomocná funkce pro hlubokou kopii dat tabulky symbolů.
  * @param src Ukazatel na zdrojová data.
  * @param dest Ukazatel na cílová data.
@@ -46,73 +66,88 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
 
   if (src->is_function) {
     // Kopírování dat funkce
-    dest->func.is_main = src->func.is_main;
     dest->func.is_resolving = src->func.is_resolving;
     dest->func.return_type = src->func.return_type;
     dest->func.return_type_explicit = src->func.return_type_explicit;
+    dest->func.is_checked = src->func.is_checked;
+    dest->func.has_return_stmt = src->func.has_return_stmt;
+    dest->func.node = src->func.node;
     dest->func.param_list_count = src->func.param_list_count;
 
-    // Pokud je počet seznamu parametrů větší než 0 a zdrojové parametry jsou
+    // Pokud je počet seznamů parametrů větší než 0 a zdrojové parametry jsou
     // NULL, vrátíme chybu
-    if (dest->func.param_list_count > 0 && src->func.params == NULL) {
+    if (dest->func.param_list_count > 0 && src->func.param_list == NULL) {
+      LOG_ERR(IFJ_EINTERNAL,
+              "Invalid function data: param_list_count > 0 and param_list "
+              "is NULL");
       return IFJ_EINTERNAL;
     }
 
-    // Pokud jsou zdrojové parametry NULL nebo počet seznamu parametrů je 0,
+    // Pokud jsou zdrojové parametry NULL nebo počet seznamů parametrů je 0,
     // nastavíme cílové parametry na NULL a vrátíme úspěch
-    if (!src->func.params || dest->func.param_list_count == 0) {
-      dest->func.params = NULL;
+    if (!src->func.param_list || dest->func.param_list_count == 0) {
+      dest->func.param_list = NULL;
       return IFJ_SUCCESS;
     }
 
-    // Alokace paměti pro pole seznamu parametrů
-    dest->func.params =
-        malloc(sizeof(param_list_t) * dest->func.param_list_count);
-    CHECK_MEM_ERR(dest->func.params);
+    // Alokace paměti pro pole ukazatelů na seznamy parametrů (calloc kvůli
+    // bezpečnému uvolnění při částečném selhání alokace)
+    dest->func.param_list =
+        calloc(dest->func.param_list_count, sizeof(param_list_t *));
+    CHECK_MEM_ERR(dest->func.param_list);
 
-    // Kopírování seznamu parametrů
+    // Kopírování jednotlivých seznamů parametrů
     for (int i = 0; i < dest->func.param_list_count; i++) {
-      dest->func.params[i].count = src->func.params[i].count;
+      // Zdrojový ukazatel na seznam parametrů nesmí být NULL
+      if (!src->func.param_list[i]) {
+        LOG_ERR(IFJ_EINTERNAL, "Invalid function data: param_list[%d] is NULL",
+                i);
+        free_param_lists(&dest->func);
+        return IFJ_EINTERNAL;
+      }
+
+      // Alokace paměti pro seznam parametrů (calloc kvůli inicializaci types
+      // na NULL pro bezpečné uvolnění při částečném selhání alokace)
+      dest->func.param_list[i] = calloc(1, sizeof(param_list_t));
+      if (!dest->func.param_list[i]) {
+        free_param_lists(&dest->func);
+        return IFJ_EINTERNAL;
+      }
+
+      // Kopírování počtu parametrů v seznamu
+      dest->func.param_list[i]->count = src->func.param_list[i]->count;
 
       // Pokud je počet typů v seznamu parametrů 0, nastavíme cílové typy na
       // NULL
-      if (dest->func.params[i].count == 0) {
-        dest->func.params[i].types = NULL;
+      if (dest->func.param_list[i]->count == 0) {
+        dest->func.param_list[i]->types = NULL;
         continue;
       }
 
       // Pokud je počet typů v seznamu parametrů větší než 0 a zdrojové typy
       // nejsou NULL, alokujeme paměť pro typy parametrů a kopírujeme je, jinak
       // vrátíme chybu
-      if (dest->func.params[i].count > 0 && src->func.params[i].types) {
-        dest->func.params[i].types =
-            malloc(sizeof(ifj26_type_t) * dest->func.params[i].count);
+      if (dest->func.param_list[i]->count > 0 &&
+          src->func.param_list[i]->types) {
+        dest->func.param_list[i]->types =
+            malloc(sizeof(ifj26_type_t) * dest->func.param_list[i]->count);
 
-        // Kontrola alokace paměti pro typy parametrů, pokud selže, uvolníme již
-        // alokované paměti a vrátíme chybu
-        if (!dest->func.params[i].types) {
-          for (int j = 0; j < i; j++) {
-            free(dest->func.params[j].types);
-          }
-
-          free(dest->func.params);
-          dest->func.params = NULL;
+        // Kontrola alokace paměti pro typy parametrů, pokud selže, uvolníme
+        // již alokované paměti a vrátíme chybu
+        if (!dest->func.param_list[i]->types) {
+          free_param_lists(&dest->func);
           return IFJ_EINTERNAL;
         }
 
         // Kopírování typů parametrů
-        memcpy(dest->func.params[i].types, src->func.params[i].types,
-               sizeof(ifj26_type_t) * dest->func.params[i].count);
+        memcpy(dest->func.param_list[i]->types, src->func.param_list[i]->types,
+               sizeof(ifj26_type_t) * dest->func.param_list[i]->count);
       } else {
         LOG_ERR(IFJ_EINTERNAL,
-                "Invalid function data: param_list_count > 0 and params "
+                "Invalid function data: param_list_count > 0 and param_list "
                 "is NULL for parameter list %d",
                 i);
-        for (int j = 0; j < i; j++) {
-          free(dest->func.params[j].types);
-        }
-        free(dest->func.params);
-        dest->func.params = NULL;
+        free_param_lists(&dest->func);
         return IFJ_EINTERNAL;
       }
     }
@@ -378,13 +413,10 @@ static void delete_data(symtable_data_t *data) {
   }
 
   if (data->is_function) {
-    if (data->func.params) {
-      for (int i = 0; i < data->func.param_list_count; i++) {
-        free(data->func.params[i].types);
-      }
-      free(data->func.params);
-    }
+    // Uvolnění pole ukazatelů na seznamy parametrů funkce
+    free_param_lists(&data->func);
   } else {
+    // Uvolnění názvu proměnné pro generování kódu
     free(data->var.code_gen_name);
   }
 }
