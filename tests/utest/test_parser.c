@@ -347,7 +347,7 @@ static void test_invalid_newline_and_indentation_rules(void **state) {
                        "def foo(): Unit =\n"
                        "\t()\n";
   ast_node_t *root = NULL;
-  assert_int_equal(parse_source(tabbed, &root), IFJ_ESYNTAX);
+  assert_int_equal(parse_source(tabbed, &root), IFJ_ELEX);
   assert_null(root);
 }
 

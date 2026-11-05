@@ -143,12 +143,16 @@ static psa_symbol_t token2psa_symbol(token_t *token, bool expect_operand,
     return open_parens > 0 ? PSA_R_PAREN : PSA_DOLLAR;
 
   case TOK_ID:
-    if (strcmp("to", token->value.str_value) == 0 ||
-        strcmp("until", token->value.str_value) == 0) {
-      return open_parens > 0 ? PSA_RANGE : PSA_DOLLAR;
-    } else {
-      return PSA_ID;
+    if (!expect_operand) {
+      if (strcmp("by", token->value.str_value) == 0) {
+        return PSA_DOLLAR;
+      }
+      if (strcmp("to", token->value.str_value) == 0 ||
+          strcmp("until", token->value.str_value) == 0) {
+        return open_parens > 0 ? PSA_RANGE : PSA_DOLLAR;
+      }
     }
+    return PSA_ID;
 
   case TOK_INT:
   case TOK_FLOAT:
