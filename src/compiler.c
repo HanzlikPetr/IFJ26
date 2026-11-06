@@ -2,10 +2,11 @@
  * @file compiler.c
  * @brief IFJ26 - Implementace kompilátoru (main)
  *
- * @author xhanzlp00 Petr Hanzlík
+ * @author xhanzlp00 Petr Hanzlík, xgleton00 Ondřej Glet
  */
 
 #include "ast.h"
+#include "error.h"
 #include "parser.h"
 #include "scanner.h"
 
