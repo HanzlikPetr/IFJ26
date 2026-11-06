@@ -36,9 +36,6 @@ IFJ_ERR parser_init(parser_t *parser, scanner_t *scanner);
 /**
  * @brief Zpracuje program začínající prologem IFJ26.
  *
- * Parser zpracovává prolog a nejvyšší úroveň definic funkcí. Tělo funkce je
- * zatím zastoupeno zástupnou implementací, která vrací interní chybu.
- *
  * @param parser Inicializovaný parser.
  * @param root Výstupní ukazatel na kořen AST.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
