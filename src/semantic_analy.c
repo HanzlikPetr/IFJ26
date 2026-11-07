@@ -5,6 +5,8 @@
  * @author xhanzlp00 Petr Hanzlík
  */
 
+#define _POSIX_C_SOURCE 200809L // Kvuli strdup
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +22,9 @@ typedef struct {
   size_t var_uid_counter; // Počítadlo pro unikátní jména proměnných (x$1, x$2)
   bool in_untyped_recursion; // Pomocný flag pro detekci nepřímé rekurze
 } sem_ctx_t;
+
+static IFJ_ERR check_block_expr(sem_ctx_t *ctx, ast_node_t *block_node,
+                                ifj26_type_t *result_type, char *func_name);
 
 /**
  * @brief Pomocná funkce pro kontrolu seznamů parametrů.
@@ -628,6 +633,379 @@ static IFJ_ERR destroy_local_symtable_stack(void *data) {
   return IFJ_SUCCESS;
 }
 
+static bool types_equal(const ifj26_type_t *a, const ifj26_type_t *b) {
+  if (a == NULL || b == NULL) {
+    return false;
+  }
+  return a->type == b->type && a->is_list == b->is_list;
+}
+
+static char *ifj26_type2str(const ifj26_type_t *type) {
+  if (type == NULL) {
+    return "NULL";
+  }
+
+  switch (type->type) {
+  case TYPE_UNRESOLVED:
+    return type->is_list ? "List<Unresolved>" : "Unresolved";
+  case TYPE_UNIT:
+    return type->is_list ? "List<Unit>" : "Unit";
+  case TYPE_INT:
+    return type->is_list ? "List<Int>" : "Int";
+  case TYPE_DOUBLE:
+    return type->is_list ? "List<Double>" : "Double";
+  case TYPE_STRING:
+    return type->is_list ? "List<String>" : "String";
+  case TYPE_BOOL:
+    return type->is_list ? "List<Bool>" : "Bool";
+  case TYPE_ANY:
+    return type->is_list ? "List<Any>" : "Any";
+  default:
+    return type->is_list ? "List<Unknown>" : "Unknown";
+  }
+}
+
+static char *gen_code_gen_name(sem_ctx_t *ctx, const char *base_name) {
+  if (ctx == NULL || base_name == NULL) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid arguments to gen_code_gen_name");
+    return NULL;
+  }
+
+  size_t name_len = strlen(base_name);
+
+  // Velikost pro unikátní jméno proměnné: délka původního jména + 1 (pro '$') + 10 (pro číslo)
+  char *code_gen_name = malloc(
+      name_len + 1 + 3); // pokud někdo vyvori 999, blocku tak to stejně spadne asi uz driv
+  if (code_gen_name == NULL) {
+    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed for code_gen_name");
+    return NULL;
+  }
+  sprintf(code_gen_name, "%s$%zu",
+          base_name,
+          ctx->var_uid_counter++);
+  return code_gen_name;
+}
+
+static ifj26_type_t get_type_from_literal(ast_node_t *literal) {
+  ifj26_type_t literal_type = {0};
+  literal_type.type = literal->as.literal.type;
+  literal_type.is_list = false; // List nemuže být literál (je to brano
+                                    // jako funkce implementační detail)
+  return literal_type;
+}
+
+static void pop_local_symtable(sem_ctx_t *ctx) {
+  if (ctx == NULL) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid argument to pop_local_symtable");
+    return;
+  }
+
+  symtable_t *local_symtable = NULL;
+  if (stack_pop(&ctx->local_scopes, (void **)&local_symtable) == IFJ_SUCCESS &&
+      local_symtable != NULL) {
+    symtable_destroy(local_symtable);
+    free(local_symtable);
+  }
+}
+
+static IFJ_ERR push_local_symtable(sem_ctx_t *ctx, symtable_t *local_symtables[], int count) {
+  if (ctx == NULL) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid argument to push_local_symtable");
+    return IFJ_EINTERNAL;
+  }
+
+  for (int i = 0; i < count; i++) {
+    if (local_symtables[i] == NULL) {
+      LOG_ERR(IFJ_EINTERNAL, "Invalid local_symtable at index %d", i);
+      return IFJ_EINTERNAL;
+    }
+    IFJ_ERR err = stack_push(&ctx->local_scopes, local_symtables[i]);
+    if (CHECK_ERR(err)) {
+      LOG_ERR(err, "Failed to push local_symtable at index %d onto stack", i);
+      return err;
+    }
+  }
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
+                                       symtable_data_t *data) {
+  CHECK_ARGS_NULL_RET(ctx, var_name, data);
+  symtable_t **remove_from_stack_symt_arr = NULL;
+  IFJ_ERR err = IFJ_SUCCESS;
+  bool is_empty = false;
+  int max_stack_depth = 8; // Maximální hloubka zásobníku pro lokální tabulky symbolů
+  int current_stack_depth = 0;
+
+  err = stack_is_empty(&ctx->local_scopes, &is_empty);
+  CHECK_ERR_LOG_RET(err, "Failed to check if local scopes stack is empty.");
+  if (is_empty) {
+    free(remove_from_stack_symt_arr);
+    return IFJ_EINTERNAL; // Stack is empty, variable not found
+  }
+
+  // Alokace paměti pro pole ukazatelů na symtable_t* (základně 8 úrovní zásobníku)
+  remove_from_stack_symt_arr = malloc(sizeof *remove_from_stack_symt_arr * max_stack_depth);
+  CHECK_MEM_ERR(remove_from_stack_symt_arr);
+
+  while(!is_empty) {
+    symtable_t *current_symtable = NULL;
+    symtable_data_t *current_data = NULL;
+
+    if (current_stack_depth >= max_stack_depth) {
+      // Pokud je potřeba více místa, alokujeme nové pole s dvojnásobnou velikostí
+      max_stack_depth *= 2;
+      symtable_t **new_arr = realloc(remove_from_stack_symt_arr, sizeof *remove_from_stack_symt_arr * max_stack_depth);
+      if (new_arr == NULL) {
+        free(remove_from_stack_symt_arr);
+        LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed while resizing remove_from_stack_symt_arr.");
+        return IFJ_EINTERNAL;
+      }
+      remove_from_stack_symt_arr = new_arr;
+    }
+
+    err = stack_pop(&ctx->local_scopes, (void **)&current_symtable);
+    CHECK_ERR_LOG_RET(err, "Failed to pop from local scopes stack.");
+
+    if (current_symtable == NULL) {
+      LOG_ERR(IFJ_EINTERNAL, "Popped NULL symtable from local scopes stack.");
+      return IFJ_EINTERNAL;
+    }
+
+    remove_from_stack_symt_arr[current_stack_depth++] = current_symtable;
+    err = symtable_find(current_symtable, var_name, &current_data);
+    if (err == IFJ_SUCCESS) {
+      // Found the variable, push back the popped symtables
+      push_local_symtable(ctx, remove_from_stack_symt_arr, current_stack_depth);
+      free(remove_from_stack_symt_arr);
+      *data = *current_data;
+      return IFJ_SUCCESS;
+    } 
+
+    err = stack_is_empty(&ctx->local_scopes, &is_empty);
+    CHECK_ERR_LOG_RET(err, "Failed to check if local scopes stack is empty.");
+  }
+
+  free(remove_from_stack_symt_arr);
+  return IFJ_ESEM_UNDEF; // Variable not found
+}
+
+static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node, ifj26_type_t *lhs_type,
+                                       ifj26_type_t *rhs_type,
+                                       ifj26_type_t *result_type) {
+  // Implement the logic to check the compatibility of types for a binary operation
+  // This is a placeholder implementation
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
+                         ifj26_type_t *result_type) {
+  CHECK_ARGS_NULL_RET(ctx, expr_node, result_type);
+
+  if (expr_node->type != AST_EXPR && expr_node->type != AST_LITERAL && expr_node->type != AST_FUNC_CALL) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type: %d (expected AST_EXPR)",
+            expr_node->type);
+    return IFJ_EINTERNAL;
+  }
+
+  if (expr_node->type == AST_LITERAL) {
+    // Vyřešení typu literálu přímo z AST uzlu
+    *result_type = get_type_from_literal(expr_node);
+  } else if (expr_node->type == AST_EXPR) {
+    if(expr_node->as.expr.is_unary){
+      CHECK_ERR_LOG_RET(
+        check_expr(ctx, expr_node->as.expr.unary.operand, result_type),
+        "Failed to check unary expression operand."
+      );
+
+    } else {
+      ifj26_type_t lhs_type = {0};
+      ifj26_type_t rhs_type = {0};
+
+      CHECK_ERR_LOG_RET(
+        check_expr(ctx, expr_node->as.expr.binary.lhs, &lhs_type),
+        "Failed to check binary expression left-hand side."
+      );
+      CHECK_ERR_LOG_RET(
+        check_expr(ctx, expr_node->as.expr.binary.rhs, &rhs_type),
+        "Failed to check binary expression right-hand side."
+      );
+
+      // Zde by měla být implementována kontrola kompatibility typů pro binární operace
+      // Například:
+      // err = check_binary_operation_types(expr_node->as.expr.binary.op, &lhs_type, &rhs_type, result_type);
+      // CHECK_ERR_LOG_RET(err, "Failed to check binary operation types.");
+    }
+  } else if (expr_node->type == AST_FUNC_CALL) {
+    // Zde by měla být implementována kontrola typu volání funkce
+    // Například:
+    // err = check_function_call(ctx, expr_node, result_type);
+    // CHECK_ERR_LOG_RET(err, "Failed to check function call.");
+  }
+
+  expr_node->inferred_type = *result_type;
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
+                           ifj26_type_t *result_type) {
+  CHECK_ARGS_NULL_RET(ctx, block_node, result_type);
+  symtable_t *local_symtable = NULL;
+  symtable_data_t data = {0};
+  IFJ_ERR err = IFJ_SUCCESS;
+
+  // Vytvoření lokální tabulky symbolů pro blok (proměnné definované v bloku)
+  local_symtable = malloc(sizeof(symtable_t));
+  CHECK_MEM_ERR(local_symtable);
+
+  symtable_init(local_symtable);
+  // Přidání lokální tabulky symbolů do kontextu
+  CHECK_ERR_LOG_RET(stack_push(&ctx->local_scopes, local_symtable),
+                    "Failed to push local symbol table onto stack.");
+
+  if (block_node->type != AST_BLOCK) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type: %d (expected AST_BLOCK)",
+            block_node->type);
+    return IFJ_EINTERNAL;
+  }
+
+  for (size_t i = 0; i < block_node->as.block.commands_cnt; i++) {
+    // Procházíme jednotlivé příkazy v bloku a kontrolujeme je
+    ast_node_t *stmt = block_node->as.block.commands[i];
+    if (stmt == NULL) {
+      LOG_ERR(IFJ_EINTERNAL, "Null statement in block at index %ld", i);
+      return IFJ_EINTERNAL;
+    }
+
+    if (stmt->type == AST_DEF) {
+      if (stmt->as.def.rhs == NULL) {
+        err = IFJ_EINTERNAL;
+        LOG_ERR(err, "Null RHS in variable definition at index %ld",
+                i);
+        goto cleanup;
+      }
+
+      if (stmt->as.def.id == NULL) {
+        err = IFJ_EINTERNAL;
+        LOG_ERR(err,
+                "Null identifier in variable definition at index %ld", i);
+        goto cleanup;
+      }
+
+      // Kontrola typu proměnné podle výrazu na pravé straně přiřazení
+      if (stmt->as.def.rhs->type == AST_LITERAL || stmt->as.def.rhs->type == AST_EXPR || stmt->as.def.rhs->type == AST_FUNC_CALL) {
+        err = check_expr(ctx, stmt->as.def.rhs, &data.var.type);
+        CHECK_ERR_LOG_GOTO(
+            err, cleanup, "Failed to check variable definition expression at index %ld",
+            i);
+      } else if (stmt->as.def.rhs->type == AST_IF) {
+        //err = check_if_expr(ctx, stmt->as.def.rhs, &data.var.type);
+        CHECK_ERR_LOG_GOTO(
+            err, cleanup, "Failed to check variable definition if expression at index %ld",
+            i);
+      } else {
+        err = IFJ_EINTERNAL;
+        LOG_ERR(err,
+                "Invalid RHS AST node type in variable definition at index %ld: "
+                "%d",
+                i, stmt->as.def.rhs->type);
+        goto cleanup;
+      }
+
+      if (data.var.type.type == TYPE_UNRESOLVED) {
+        err = IFJ_ESEM_TYPE;
+        LOG_ERR(err,
+                "Unresolved type in variable definition at index %ld", i);
+        goto cleanup;
+      }
+
+      if (stmt->as.def.type.type != TYPE_UNRESOLVED) {
+        // Pokud je typ explicitně určen, zkontrolujeme jeho kompatibilitu s odvozeným typem
+        if (!types_equal(&stmt->as.def.type, &data.var.type)) {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Type mismatch in variable definition at index %ld: "
+            "explicit type '%s' does not match inferred type '%s'",
+            i, ifj26_type2str(&stmt->as.def.type),
+            ifj26_type2str(&data.var.type));
+        }
+      }
+
+      // Kontrola definice proměnné
+      data.is_function = false;
+      data.var.is_mutable = stmt->as.def.mut;
+      data.var.code_gen_name = gen_code_gen_name(ctx, stmt->as.def.id);
+      if (data.var.code_gen_name == NULL) {
+        err = IFJ_EINTERNAL;
+        LOG_ERR(err,
+                "Failed to generate code generation name for variable '%s'",
+                stmt->as.def.id);
+        goto cleanup;
+      }
+
+      // Vložení proměnné do lokální tabulky symbolů
+      err = symtable_insert(local_symtable, stmt->as.def.id, &data);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Failed to insert variable '%s' into local symbol table at index %ld",
+            stmt->as.def.id, i);
+
+      // Uložení odvozeného typu do AST uzlu příkazu a zapsaní code_gen_name
+      stmt->as.def.type = data.var.type;
+      free(stmt->as.def.id);
+      stmt->as.def.id = strdup(data.var.code_gen_name);
+      if (stmt->as.def.id == NULL) {
+        err = IFJ_EINTERNAL;
+        LOG_ERR(err,
+                "Failed to duplicate code generation name for variable '%s'",
+                data.var.code_gen_name);
+        goto cleanup;
+      }
+    } else if (stmt->type == AST_ASSIGN) {
+      // Kontrola přiřazení
+    }
+
+    // Zde by měla být implementována kontrola jednotlivých typů příkazů
+    // Například:
+    // if (stmt->type == AST_RETURN) { ... }
+    // else if (stmt->type == AST_IF) { ... }
+    // else if (stmt->type == AST_WHILE) { ... }
+    // else { ... }
+
+    // Prozatím jen logujeme typ příkazu
+  }
+
+cleanup:
+  // Odstranění lokální tabulky symbolů z kontextu a její uvolnění
+  pop_local_symtable(ctx);
+  return err;
+}
+
+static IFJ_ERR check_block_expr(sem_ctx_t *ctx, ast_node_t *func_body,
+                                ifj26_type_t *result_type, char *func_name) {
+  CHECK_ARGS_NULL_RET(ctx, func_body, result_type);
+  IFJ_ERR err = IFJ_SUCCESS;
+
+  if (func_body->type == AST_BLOCK) {
+    // Kontrola bloku příkazů
+    err = check_block(ctx, func_body, result_type);
+    CHECK_ERR_LOG_RET(err, "Failed to check function body for function '%s'.",
+                      func_name ? func_name : "unknown");
+  } else if (func_body->type == AST_EXPR) {
+    // Kontrola výrazu, který je tělem funkce
+    err = check_expr(ctx, func_body, result_type);
+    CHECK_ERR_LOG_RET(err,
+                      "Failed to check function body expression for function "
+                      "'%s'.",
+                      func_name ? func_name : "unknown");
+  } else {
+    CHECK_ERR_LOG_RET(IFJ_EINTERNAL,
+                      "Invalid AST node type for function body: %d",
+                      func_body->type);
+  }
+  return err;
+}
+
 static IFJ_ERR check_function(symtable_t *functions_table,
                               symtable_data_t *func_data) {
   CHECK_ARGS_NULL_RET(functions_table, func_data);
@@ -635,6 +1013,7 @@ static IFJ_ERR check_function(symtable_t *functions_table,
   symtable_t *local_symtable = NULL;
   IFJ_ERR err = IFJ_SUCCESS;
   char *code_gen_name = NULL;
+  ifj26_type_t result_type = {0};
 
   // Funkce již byla zkontrolována, přeskočíme ji
   if (func_data->func.is_checked) {
@@ -645,7 +1024,8 @@ static IFJ_ERR check_function(symtable_t *functions_table,
   // explicitně určen
   if (func_data->func.is_resolving &&
       func_data->func.return_type_explicit == false) {
-    CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+    err = IFJ_ESEM_TYPE;
+    CHECK_ERR_LOG_RET(err,
                       "Indirect recursion detected in function '%s' with "
                       "unresolved return type.",
                       func_data->func.node->as.func.id);
@@ -675,6 +1055,12 @@ static IFJ_ERR check_function(symtable_t *functions_table,
       "Failed to initialize local symbol table for function '%s'.",
       func_data->func.node->as.func.id);
 
+  // Vložení lokální tabulky symbolů do zásobníku lokálních tabulek
+  CHECK_ERR_LOG_RET(
+      stack_push(&ctx.local_scopes, local_symtable),
+      "Failed to push local symbol table onto stack for function '%s'.",
+      func_data->func.node->as.func.id);
+
   // Vložení parametrů funkce do lokální tabulky symbolů
   for (int i = 0; i < func_data->func.param_list_count; i++) {
     param_list_t *param_list = func_data->func.param_list[i];
@@ -682,24 +1068,24 @@ static IFJ_ERR check_function(symtable_t *functions_table,
       // Vložení parametru do lokální tabulky symbolů
       symtable_data_t param_data = {0};
       param_data.is_function = false;
-
-      // Velikost pro unikátní jméno proměnné: délka původního jména + 1 (pro
-      // '$') + 10 (pro číslo)
+      param_data.var.type = param_list->types[j];
+      param_data.var.is_mutable = false; // Parametry jsou implicitně neměnné
       code_gen_name =
-          malloc(strlen(func_data->func.node->as.func.param_lists[i]
-                            ->as.param_list.params[j]
-                            ->as.param.id) +
-                 1 + 10);
+          gen_code_gen_name(&ctx, func_data->func.node->as.func.param_lists[i]
+                                      ->as.param_list.params[j]
+                                      ->as.param.id);
       if (code_gen_name == NULL) {
-        CHECK_ERR_LOG_GOTO(
-            IFJ_EINTERNAL, cleanup,
-            "Failed to allocate memory for code generation name.");
+        err = IFJ_EINTERNAL;
+        LOG_ERR(err,
+                "Failed to generate code generation name for parameter '%s' "
+                "of function '%s'.",
+                func_data->func.node->as.func.param_lists[i]
+                    ->as.param_list.params[j]
+                    ->as.param.id,
+                func_data->func.node->as.func.id);
+        err = IFJ_EINTERNAL;
+        goto cleanup;
       }
-      sprintf(code_gen_name, "%s$%zu",
-              func_data->func.node->as.func.param_lists[i]
-                  ->as.param_list.params[j]
-                  ->as.param.id,
-              ctx.var_uid_counter++);
       param_data.var.code_gen_name = code_gen_name;
 
       param_data.var.type = param_list->types[j];
@@ -721,14 +1107,55 @@ static IFJ_ERR check_function(symtable_t *functions_table,
     }
   }
 
-  // Vložení lokální tabulky symbolů do zásobníku lokálních tabulek
-  CHECK_ERR_LOG_RET(
-      stack_push(&ctx.local_scopes, local_symtable),
-      "Failed to push local symbol table onto stack for function '%s'.",
-      func_data->func.node->as.func.id);
-  local_symtable = NULL; // Vlastní tabulka symbolů je nyní spravována
-                         // zásobníkem, aby nedošlo k dvojímu uvolnění
+  err = check_block_expr(&ctx, func_data->func.node->as.func.body, &result_type, func_data->func.node->as.func.id);
+  CHECK_ERR_LOG_GOTO(err, cleanup,
+                    "Failed to check function body for function '%s'.",
+                    func_data->func.node->as.func.id);
 
+  // Pokud funkce má návratové příkazy, ale nemá explicitně určený návratový
+  // typ, vracíme chybu.
+  if (func_data->func.return_type_explicit == false &&
+      func_data->func.has_return_stmt == true) {
+    err = IFJ_ESEM_TYPE;
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                      "Function '%s' has return statements but no explicit "
+                      "return type.",
+                      func_data->func.node->as.func.id);
+  }
+
+  // Pokud funkce má explicitně určený návratový typ, kontrolujeme, zda se
+  // shoduje s typem vráceným z těla funkce.
+  if (func_data->func.return_type_explicit == true &&
+      func_data->func.return_type.type != TYPE_UNIT) {
+    if (types_equal(&func_data->func.return_type, &result_type)) {
+      // Typy se shodují, vše je v pořádku
+    } else {
+      err = IFJ_ESEM_TYPE;
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                        "Function '%s' has explicit return type '%s' but "
+                        "return statement returns '%s'.",
+                        func_data->func.node->as.func.id,
+                        ifj26_type2str(&func_data->func.return_type),
+                        ifj26_type2str(&result_type));
+    }
+  }
+
+  // Pokud funkce nemá explicitně určený návratový typ, nastavíme jej na typ
+  // vrácený z těla funkce.
+  if (func_data->func.return_type_explicit == false) {
+    if (func_data->func.node->as.func.main) {
+      // Hlavní funkce musí mít návratový typ Unit
+      if (result_type.type != TYPE_UNIT || result_type.is_list) {
+        err = IFJ_ESEM_TYPE;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                          "Main function must have return type Unit.");
+      }
+    }
+    func_data->func.return_type = result_type;
+  }
+
+  // Označení funkce jako zkontrolované
+  func_data->func.is_checked = true;
 cleanup:
   func_data->func.is_resolving = false;
   stack_deep_dtor(&ctx.local_scopes, destroy_local_symtable_stack);
