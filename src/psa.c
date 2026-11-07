@@ -291,11 +291,11 @@ static void free_psa_stack_nodes(psa_stack_node_t *nodes[], int count) {
  * @param parser Parser používaný pro diagnostiku chyb.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
  */
-static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
-                                      psa_stack_node_t *stack_array[],
-                                      int *out_count,
-                                      psa_symbol_t *stack_top_symbol,
-                                      parser_t *parser) {
+static IFJ_ERR get_term_from_stack(stack_t *stack,
+                                   psa_stack_node_t *stack_array[],
+                                   int *out_count,
+                                   psa_symbol_t *stack_top_symbol,
+                                   parser_t *parser) {
   CHECK_ARGS_NULL_RET(stack, stack_array, out_count);
   void *data_out;
   psa_stack_node_t *node;
@@ -347,8 +347,8 @@ static IFJ_ERR get_nonterm_from_stack(stack_t *stack,
  * @param parser Parser používaný pro diagnostiku chyb.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
  */
-static IFJ_ERR push_single_term(stack_t *stack, psa_stack_node_t *nodes[],
-                                int node_count, parser_t *parser) {
+static IFJ_ERR push_single_nonterm(stack_t *stack, psa_stack_node_t *nodes[],
+                                   int node_count, parser_t *parser) {
   CHECK_ARGS_NULL_RET(stack, nodes, parser);
   IFJ_ERR err;
 
@@ -1179,9 +1179,9 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
     }
   }
 
-  err = get_nonterm_from_stack(stack, stack_array_get_nonterm,
-                               stack_array_get_nonterm_count, stack_top_symbol,
-                               parser);
+  err = get_term_from_stack(stack, stack_array_get_nonterm,
+                            stack_array_get_nonterm_count, stack_top_symbol,
+                            parser);
   CHECK_ERR_LOG_RET(err, "Failed to get non-terminal from stack");
 
   push_node = create_psa_stack_node(PSA_HANDLE, NULL, NULL);
@@ -1200,8 +1200,8 @@ static IFJ_ERR psa_shift(stack_t *stack, parser_t *parser,
     return err;
   }
 
-  err = push_single_term(stack, stack_array_get_nonterm,
-                         *stack_array_get_nonterm_count, parser);
+  err = push_single_nonterm(stack, stack_array_get_nonterm,
+                            *stack_array_get_nonterm_count, parser);
   CHECK_ERR_LOG_RET(err, "Failed to restore terminal on the stack");
 
   token = copy_token(&parser->current_token);
@@ -1500,13 +1500,13 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
     // zarážka (<)
     stack_array_get_nonterm_count = 0;
 
-    err = get_nonterm_from_stack(&stack, stack_array_get_nonterm,
-                                 &stack_array_get_nonterm_count,
-                                 &stack_top_symbol, parser);
+    err = get_term_from_stack(&stack, stack_array_get_nonterm,
+                              &stack_array_get_nonterm_count, &stack_top_symbol,
+                              parser);
     CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get non-terminal from stack");
 
-    err = push_single_term(&stack, stack_array_get_nonterm,
-                           stack_array_get_nonterm_count, parser);
+    err = push_single_nonterm(&stack, stack_array_get_nonterm,
+                              stack_array_get_nonterm_count, parser);
     CHECK_ERR_LOG_GOTO(err, cleanup,
                        "Failed to restore non-terminal on the stack");
 
