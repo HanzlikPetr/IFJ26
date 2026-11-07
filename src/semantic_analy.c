@@ -787,6 +787,7 @@ static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
     CHECK_ERR_LOG_RET(err, "Failed to check if local scopes stack is empty.");
   }
 
+  push_local_symtable(ctx, remove_from_stack_symt_arr, current_stack_depth);
   free(remove_from_stack_symt_arr);
   return IFJ_ESEM_UNDEF; // Variable not found
 }
@@ -801,7 +802,8 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node, ifj26_type_t 
 
 static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
                          ifj26_type_t *result_type) {
-  CHECK_ARGS_NULL_RET(ctx, expr_node, result_type);
+  CHECK_ARGS_NULL_RET(ctx, expr_node);
+  ifj26_type_t local_result_type = {0};
 
   if (expr_node->type != AST_EXPR && expr_node->type != AST_LITERAL && expr_node->type != AST_FUNC_CALL) {
     LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type: %d (expected AST_EXPR)",
@@ -811,11 +813,11 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
 
   if (expr_node->type == AST_LITERAL) {
     // Vyřešení typu literálu přímo z AST uzlu
-    *result_type = get_type_from_literal(expr_node);
+    local_result_type = get_type_from_literal(expr_node);
   } else if (expr_node->type == AST_EXPR) {
     if(expr_node->as.expr.is_unary){
       CHECK_ERR_LOG_RET(
-        check_expr(ctx, expr_node->as.expr.unary.operand, result_type),
+        check_expr(ctx, expr_node->as.expr.unary.operand, &local_result_type),
         "Failed to check unary expression operand."
       );
 
@@ -844,7 +846,11 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
     // CHECK_ERR_LOG_RET(err, "Failed to check function call.");
   }
 
-  expr_node->inferred_type = *result_type;
+  if (result_type) {
+    *result_type = local_result_type; // Uložení odvozeného typu do výstupního parametru
+  }
+  
+  expr_node->inferred_type = local_result_type; // Uložení odvozeného typu do AST uzlu
   return IFJ_SUCCESS;
 }
 
@@ -963,6 +969,92 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       }
     } else if (stmt->type == AST_ASSIGN) {
       // Kontrola přiřazení
+      if (stmt->as.assign.id == NULL || stmt->as.assign.rhs == NULL) {
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Null identifier or RHS in assignment at index %ld", i);
+      }
+
+      // Vyhledání proměnné v zásobníku lokálních tabulek symbolů
+      err = search_variable_in_stack(ctx, stmt->as.assign.id, &data);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Failed to find variable '%s' in local scopes stack for assignment at index %ld",
+            stmt->as.assign.id, i);
+    
+      
+      if (!data.var.is_mutable) {
+        err = IFJ_ESEM_IMMUT;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Attempt to assign to immutable variable '%s' at index %ld",
+            stmt->as.assign.id, i);
+      }
+
+
+      err = check_expr(ctx, stmt->as.assign.rhs, NULL);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Failed to check assignment expression for variable '%s' at index %ld",
+            stmt->as.assign.id, i);
+
+      // Kontrola kompatibility typů přiřazení
+      if (!types_equal(&data.var.type, &stmt->as.assign.rhs->inferred_type)) {
+        err = IFJ_ESEM_TYPE;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Type mismatch in assignment to variable '%s' at index %ld: "
+            "variable type '%s' does not match expression type '%s'",
+            stmt->as.assign.id, i,
+            ifj26_type2str(&data.var.type),
+            ifj26_type2str(&stmt->as.assign.rhs->inferred_type));
+      }
+    } else if (stmt->type == AST_FUNC_RET) {
+      ctx->current_func->has_return_stmt = true;
+
+      if (!ctx->current_func->return_type_explicit) {
+        CHECK_ERR_LOG_GOTO(
+            IFJ_ESEM_TYPE, cleanup,
+            "Failed to check return expression at index %ld", i);
+      }
+
+      if (stmt->as.func_ret.rhs == NULL) {
+        if (ctx->current_func->return_type.type == TYPE_UNIT) {
+          // samotný return bez výrazu je v pořádku, pokud je návratový typ Unit
+          continue;
+        } else {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Return statement without expression in function with non-Unit return type at index %ld", i);
+        }
+      }
+
+      if (stmt->as.func_ret.rhs->type == AST_LITERAL || stmt->as.func_ret.rhs->type == AST_EXPR || stmt->as.func_ret.rhs->type == AST_FUNC_CALL) {
+        err = check_expr(ctx, stmt->as.func_ret.rhs, NULL);
+        CHECK_ERR_LOG_GOTO(err, cleanup, 
+              "Failed to check return expression at index %ld", i);
+      } else if (stmt->as.func_ret.rhs->type == AST_IF) {
+        //err = check_if_expr(ctx, stmt->as.func_ret.rhs, NULL);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+              "Failed to check return if expression at index %ld", i);
+      } else {
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+              "Invalid AST node type for return expression at index %ld: %d",
+              i, stmt->as.func_ret.rhs->type);
+      }
+      
+      
+      if (ctx->current_func->return_type.type == TYPE_UNIT) {
+        continue; // return s výrazem je v pořádku, pokud je návratový typ Unit, vysledek se ignoruje
+      }
+
+      // Kontrola kompatibility typů návratového výrazu s deklarovaným návratovým typem funkce
+      if (!types_equal(&ctx->current_func->return_type, &stmt->as.func_ret.rhs->inferred_type)) {
+        err = IFJ_ESEM_TYPE;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+            "Type mismatch in return statement at index %ld: "
+            "function return type '%s' does not match expression type '%s'",
+            i,
+            ifj26_type2str(&ctx->current_func->return_type),
+            ifj26_type2str(&stmt->as.func_ret.rhs->inferred_type));
+      }
     }
 
     // Zde by měla být implementována kontrola jednotlivých typů příkazů
