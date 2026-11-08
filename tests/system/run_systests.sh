@@ -43,7 +43,7 @@ VALGRIND_ERR=100
 # standardně spouštějí jen testy chyb 1 a 2. Po dokončení dalších fází
 # překladače lze přidat další kategorie, např.:
 #   CATEGORIES="1_lex 2_syntax 3_undef 4_redef" bash tests/system/run_systests.sh
-CATEGORIES=${CATEGORIES:-"1_lex 2_syntax"}
+CATEGORIES=${CATEGORIES:-"1_lex 2_syntax 3_undef 4_redef 5_args 6_type 7_immut 10_other"}
 
 if [ ! -x "$COMPILER" ]; then
   echo "Překladač $COMPILER neexistuje, nejdřív spusť make."
