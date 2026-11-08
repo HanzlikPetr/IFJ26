@@ -686,15 +686,15 @@ static char *gen_code_gen_name(sem_ctx_t *ctx, const char *base_name) {
 
   // délka původního jména + 1 (pro '$') + 3 (pro číslo) + 1 ('\0')
   // pokud někdo vyvori 999, blocku tak to stejně spadne asi uz driv
-  size_t new_len = name_len + 1 + 3 + 1; 
-  
-  char *code_gen_name = malloc(new_len); 
+  size_t new_len = name_len + 1 + 3 + 1;
+
+  char *code_gen_name = malloc(new_len);
   if (code_gen_name == NULL) {
     LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed for code_gen_name");
     return NULL;
   }
-  snprintf(code_gen_name, new_len,"%s$%d", base_name,
-          ctx->current_scope_level); // Přidání úrovně zanoření pro unikátnost
+  snprintf(code_gen_name, new_len, "%s$%d", base_name,
+           ctx->current_scope_level); // Přidání úrovně zanoření pro unikátnost
   return code_gen_name;
 }
 
@@ -850,8 +850,8 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
 
   // Kontrola typu podmínky
   err = check_if_expr_is_bool(ctx, if_node);
-  CHECK_ERR_LOG_RET(err,
-                    "Failed to check condition expression in if statement or expresion is not type boolean.");
+  CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
+                         "or expresion is not type boolean.");
 
   // Kontrola bloků then a else
   ifj26_type_t types_array[2] = {
@@ -918,15 +918,15 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
     // err = check_function_call(ctx, expr_node, result_type);
     // CHECK_ERR_LOG_RET(err, "Failed to check function call.");
   } else if (expr_node->type == AST_IF) {
-    CHECK_ERR_LOG_RET(
-        check_if_expr(ctx, expr_node, result_type),
-        "Failed to check if expression.");
+    CHECK_ERR_LOG_RET(check_if_expr(ctx, expr_node, result_type),
+                      "Failed to check if expression.");
   } else {
     LOG_ERR(IFJ_EINTERNAL, "Unsupported AST node type: %d", expr_node->type);
     return IFJ_EINTERNAL;
   }
 
-  expr_node->inferred_type = *result_type; // Uložení odvozeného typu do AST uzlu
+  expr_node->inferred_type =
+      *result_type; // Uložení odvozeného typu do AST uzlu
   return IFJ_SUCCESS;
 }
 
@@ -947,14 +947,14 @@ static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node) {
 
   // Kontrola typu podmínky (if)
   err = check_if_expr_is_bool(ctx, if_node);
-  CHECK_ERR_LOG_RET(err,
-                    "Failed to check condition expression in if statement or expresion is not type boolean.");
+  CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
+                         "or expresion is not type boolean.");
 
   // Kontrola typu podmímnky (else if)
-  for(size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++){
+  for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
     err = check_if_expr_is_bool(ctx, if_node->as.if_st.else_if[i]);
-    CHECK_ERR_LOG_RET(err,
-                      "Failed to check condition expression in else if statement or expresion is not type boolean.");
+    CHECK_ERR_LOG_RET(err, "Failed to check condition expression in else if "
+                           "statement or expresion is not type boolean.");
   }
 
   return IFJ_SUCCESS;
@@ -1082,10 +1082,12 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
 
       // Vložení proměnné do lokální tabulky symbolů
       err = symtable_insert(local_symtable, stmt->as.def.id, &data);
-      if(CHECK_ERR(err)) {
+      if (CHECK_ERR(err)) {
         free(data.var.code_gen_name);
-        LOG_ERR(err, "Failed to insert variable '%s' into local symbol table at index %ld",
-          stmt->as.def.id, i);
+        LOG_ERR(err,
+                "Failed to insert variable '%s' into local symbol table at "
+                "index %ld",
+                stmt->as.def.id, i);
         goto cleanup;
       }
 
@@ -1130,7 +1132,8 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
                          stmt->as.assign.id, i);
 
       // Kontrola kompatibility typů přiřazení
-      if (!types_compatible(&data.var.type, &stmt->as.assign.rhs->inferred_type)) {
+      if (!types_compatible(&data.var.type,
+                            &stmt->as.assign.rhs->inferred_type)) {
         err = IFJ_ESEM_TYPE;
         CHECK_ERR_LOG_GOTO(
             err, cleanup,
@@ -1218,7 +1221,20 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
         err = check_if(ctx, stmt);
         CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to check if statement at index %ld", i);
+        *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
       }
+    } else if (stmt->type == AST_WHILE) {
+      // Kontrola typu podmínky cyklu while
+      err = check_if_expr_is_bool(ctx, stmt);
+      CHECK_ERR_LOG_GOTO(
+          err, cleanup,
+          "Failed to check condition expression in while loop at index %ld", i);
+
+      err = check_block(ctx, stmt->as.while_st.body, result_type, false);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to check while loop body at index %ld", i);
+      *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
+    } else if (stmt->type == AST_FOR) {
     }
 
     // Zde by měla být implementována kontrola jednotlivých typů příkazů
