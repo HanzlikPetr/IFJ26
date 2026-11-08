@@ -379,6 +379,9 @@ static IFJ_ERR create_ast_literal(token_t *token, ast_node_t **out_ast,
   ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
   CHECK_MEM_ERR(new_ast_node);
 
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
   new_ast_node->type = AST_LITERAL;
   new_ast_node->as.literal.is_folded = is_folded;
 
@@ -446,6 +449,9 @@ static IFJ_ERR create_ast_var(token_t *token, ast_node_t **out_ast) {
   ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
   CHECK_MEM_ERR(new_ast_node);
 
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
   new_ast_node->type = AST_VAR;
 
   if (token->type == TOK_ID) {
@@ -480,6 +486,9 @@ static IFJ_ERR create_ast_binary_expr(token_t *operator_token, ast_node_t **lhs,
 
   ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
   CHECK_MEM_ERR(new_ast_node);
+
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
 
   if (operator_token->type == TOK_ID) {
     if (strcmp("to", operator_token->value.str_value) == 0) {
@@ -522,6 +531,9 @@ static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
   ast_node_t *new_ast_node = malloc(sizeof *new_ast_node);
   CHECK_MEM_ERR(new_ast_node);
 
+  new_ast_node->inferred_type.type = TYPE_UNRESOLVED;
+  new_ast_node->inferred_type.is_list = false;
+
   new_ast_node->type = AST_EXPR;
   new_ast_node->as.expr.is_unary = true;
   new_ast_node->as.expr.operator_type = operator_token->type;
@@ -540,6 +552,8 @@ static IFJ_ERR create_ast_unary_expr(token_t *operator_token,
  */
 static void init_func_call_ast(ast_node_t *func_call_ast) {
   func_call_ast->type = AST_FUNC_CALL;
+  func_call_ast->inferred_type.type = TYPE_UNRESOLVED;
+  func_call_ast->inferred_type.is_list = false;
   func_call_ast->as.func_call.param_lists = NULL;
   func_call_ast->as.func_call.param_lists_cnt = 0;
 }
@@ -550,6 +564,8 @@ static void init_func_call_ast(ast_node_t *func_call_ast) {
  */
 static void init_param_list_ast(ast_node_t *param_list_ast) {
   param_list_ast->type = AST_PARAM_LIST;
+  param_list_ast->inferred_type.type = TYPE_UNRESOLVED;
+  param_list_ast->inferred_type.is_list = false;
   param_list_ast->as.param_list.params = NULL;
   param_list_ast->as.param_list.params_cnt = 0;
 }
