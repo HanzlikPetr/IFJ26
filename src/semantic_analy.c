@@ -31,7 +31,6 @@ typedef struct {
   stack_t local_scopes;        // Zásobník lokálních symtable_t* pro bloky
   int current_scope_level; // Aktuální úroveň zanoření bloků
   func_data_t *current_func;   // Právě analyzovaná funkce
-  bool in_untyped_recursion; // Pomocný flag pro detekci nepřímé rekurze
 } sem_ctx_t;
 
 static IFJ_ERR check_funciton_body(sem_ctx_t *ctx, ast_node_t *block_node,
@@ -338,6 +337,13 @@ static IFJ_ERR symtable_fill_built_in_functions(symtable_t *table) {
       (ifj26_type_t){.type = TYPE_DOUBLE, .is_list = false}, 1, lists);
   CHECK_ERR_RET(err);
 
+  // readBoolean(): Boolean
+  lists[0] = &(param_list_t){.count = 0, .types = NULL};
+  err = insert_built_in_function(
+      table, "readBoolean", (ifj26_type_t){.type = TYPE_BOOL, .is_list = false},
+      1, lists);
+  CHECK_ERR_RET(err);
+
   // toStr(value: any): String
   lists[0] = &(param_list_t){
       .count = 1,
@@ -347,10 +353,10 @@ static IFJ_ERR symtable_fill_built_in_functions(symtable_t *table) {
       lists);
   CHECK_ERR_RET(err);
 
-  // toInt(value: String): Int
+  // toInt(value: Double): Int
   lists[0] = &(param_list_t){
       .count = 1,
-      .types = (ifj26_type_t[]){{.type = TYPE_STRING, .is_list = false}}};
+      .types = (ifj26_type_t[]){{.type = TYPE_DOUBLE, .is_list = false}}};
   err = insert_built_in_function(
       table, "toInt", (ifj26_type_t){.type = TYPE_INT, .is_list = false}, 1,
       lists);
@@ -914,7 +920,9 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
         (lhs_type->type == TYPE_DOUBLE && rhs_type->type == TYPE_INT) ||
         (lhs_type->type == TYPE_DOUBLE && rhs_type->type == TYPE_DOUBLE)) {
       result_type->type = TYPE_DOUBLE;
-    } else if (lhs_type->type == rhs_type->type) {
+    } else if (lhs_type->type == rhs_type->type &&
+               lhs_type->type != TYPE_BOOL) {
+      // Bool není číselný ani řetězový typ, sčítání Bool hodnot není povoleno
       result_type->type = lhs_type->type;
     } else {
       CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Invalid types for addition: %s and %s.",
@@ -951,7 +959,20 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
   case TOK_LT:
   case TOK_LEQ:
   case TOK_GT:
-  case TOK_GEQ:
+  case TOK_GEQ: {
+    // Relační operátory <, <=, >, >= jsou povoleny pouze pro dvě čísla nebo
+    // dva řetězce; Bool lze porovnávat pouze pomocí == a !=
+    bool is_ordering = expr_node->as.expr.operator_type != TOK_EQ &&
+                       expr_node->as.expr.operator_type != TOK_NEQ;
+
+    if (is_ordering && (lhs_type->type == TYPE_BOOL ||
+                        rhs_type->type == TYPE_BOOL)) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                        "Ordering comparison of Bool values is not allowed: %s "
+                        "and %s.",
+                        ifj26_type2str(lhs_type), ifj26_type2str(rhs_type));
+    }
+
     if (lhs_type->type == rhs_type->type) {
       result_type->type = TYPE_BOOL;
     } else if ((lhs_type->type == TYPE_INT && rhs_type->type == TYPE_DOUBLE) ||
@@ -963,6 +984,7 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                         ifj26_type2str(lhs_type), ifj26_type2str(rhs_type));
     }
     break;
+  }
   case TOK_AND:
   case TOK_OR:
     if (lhs_type->type == TYPE_BOOL && rhs_type->type == TYPE_BOOL) {
@@ -1076,14 +1098,43 @@ static IFJ_ERR check_if_expr_is_bool(sem_ctx_t *ctx, ast_node_t *if_expr) {
 }
 
 /**
+ * @brief Zkontroluje tělo jedné větve podmíněné konstrukce (blok příkazů nebo
+ *        přímý výraz) a vrátí její výsledný typ.
+ * @param ctx Kontext sémantické analýzy.
+ * @param branch AST uzel těla větve.
+ * @param branch_type Ukazatel na výsledný typ větve.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatném AST uzlu.
+ * @return Chybový kód z kontroly bloku nebo výrazu.
+ */
+static IFJ_ERR check_if_branch(sem_ctx_t *ctx, ast_node_t *branch,
+                               ifj26_type_t *branch_type) {
+  CHECK_ARGS_NULL_RET(ctx, branch, branch_type);
+
+  if (branch->type == AST_BLOCK) {
+    return check_block(ctx, branch, branch_type, false);
+  }
+
+  if (branch->type == AST_EXPR || branch->type == AST_LITERAL ||
+      branch->type == AST_FUNC_CALL || branch->type == AST_IF ||
+      branch->type == AST_VAR) {
+    return check_expr(ctx, branch, branch_type);
+  }
+
+  LOG_ERR(IFJ_EINTERNAL, "Invalid branch AST node type: %d", branch->type);
+  return IFJ_EINTERNAL;
+}
+
+/**
  * @brief Pomocná funkce pro kontrolu if použitého jako výraz (musí mít větev
- *        else a žádnou větev else if, typem výrazu je typ bloku then).
+ *        else; typem výrazu je sjednocený typ větví then, else if a else,
+ *        přičemž se aplikuje implicitní konverze Int na Double). Chybí-li
+ *        větev else, jedná se o zkrácený podmíněný příkaz a výsledkem je ().
  * @param ctx Kontext sémantické analýzy.
  * @param if_node AST uzel if výrazu (AST_IF).
  * @param result_type Ukazatel na výsledný typ if výrazu.
  * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatné struktuře
  *         AST uzlu.
- * @return IFJ_ESEM_TYPE při nekompatibilních typech bloků then a else.
+ * @return IFJ_ESEM_TYPE při nekompatibilních typech větví.
  * @return IFJ_SUCCESS při úspěšné kontrole if výrazu.
  */
 static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
@@ -1097,8 +1148,7 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
     return IFJ_EINTERNAL;
   }
 
-  if (if_node->as.if_st.body == NULL || if_node->as.if_st.else_st == NULL ||
-      if_node->as.if_st.else_if_cnt != 0) {
+  if (if_node->as.if_st.body == NULL || if_node->as.if_st.else_st == NULL) {
     CHECK_ERR_LOG_RET(IFJ_ESEM_OTHER,
                       "Invalid AST node structure for if statement expr.");
   }
@@ -1108,33 +1158,61 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
                          "or expression is not of type Bool.");
 
-  // Kontrola bloků then a else
-  ifj26_type_t types_array[2] = {
-      {0}}; // Pole pro uložení typů bloků then a else
-
-  if (if_node->as.if_st.body->type == AST_BLOCK) {
-    err = check_block(ctx, if_node->as.if_st.body, types_array, false);
-  } else {
-    err = check_expr(ctx, if_node->as.if_st.body, types_array);
-  }
+  // Kontrola větve then
+  ifj26_type_t branch_type = {0};
+  err = check_if_branch(ctx, if_node->as.if_st.body, &branch_type);
   CHECK_ERR_LOG_RET(err, "Failed to check then block in if statement.");
 
-  if (if_node->as.if_st.else_st->type == AST_BLOCK) {
-    err = check_block(ctx, if_node->as.if_st.else_st, types_array + 1, false);
-  } else {
-    err = check_expr(ctx, if_node->as.if_st.else_st, types_array + 1);
+  // Sjednocení typů všech větví; výsledkem je typ první větve, pokud jsou
+  // kompatibilní, jinak typ pozdější větve (implicitní konverze Int na Double)
+  ifj26_type_t unified_type = branch_type;
+
+  for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
+    if (if_node->as.if_st.else_if[i] == NULL) {
+      LOG_ERR(IFJ_EINTERNAL, "Null else if branch node at index %ld.", i);
+      return IFJ_EINTERNAL;
+    }
+
+    // Kontrola typu podmínky (else if)
+    err = check_if_expr_is_bool(
+        ctx, if_node->as.if_st.else_if[i]->as.else_if_st.expr);
+    CHECK_ERR_LOG_RET(err, "Failed to check condition expression in else if "
+                           "statement or expression is not of type Bool.");
+
+    err = check_if_branch(ctx, if_node->as.if_st.else_if[i]->as.else_if_st.body,
+                          &branch_type);
+    CHECK_ERR_LOG_RET(err, "Failed to check else if branch in if statement.");
+
+    if (!types_compatible(&unified_type, &branch_type)) {
+      if (!types_compatible(&branch_type, &unified_type)) {
+        CHECK_ERR_LOG_RET(
+            IFJ_ESEM_TYPE,
+            "Type mismatch between if expression branches: branch 0 has type "
+            "'%s', but branch %ld has type '%s'.",
+            ifj26_type2str(&unified_type), i + 1, ifj26_type2str(&branch_type));
+      }
+
+      unified_type = branch_type;
+    }
   }
+
+  // Kontrola větve else
+  err = check_if_branch(ctx, if_node->as.if_st.else_st, &branch_type);
   CHECK_ERR_LOG_RET(err, "Failed to check else block in if statement.");
 
-  if (!types_compatible(&types_array[0], &types_array[1])) {
-    CHECK_ERR_LOG_RET(
-        IFJ_ESEM_TYPE,
-        "Type mismatch between then and else blocks in if statement: "
-        "then block type '%s', else block type '%s'.",
-        ifj26_type2str(&types_array[0]), ifj26_type2str(&types_array[1]));
+  if (!types_compatible(&unified_type, &branch_type)) {
+    if (!types_compatible(&branch_type, &unified_type)) {
+      CHECK_ERR_LOG_RET(
+          IFJ_ESEM_TYPE,
+          "Type mismatch between then and else blocks in if statement: "
+          "then block type '%s', else block type '%s'.",
+          ifj26_type2str(&unified_type), ifj26_type2str(&branch_type));
+    }
+
+    unified_type = branch_type;
   }
 
-  *result_type = types_array[0];
+  *result_type = unified_type;
   return IFJ_SUCCESS;
 }
 
@@ -1264,6 +1342,40 @@ static IFJ_ERR check_list_method_call(sem_ctx_t *ctx, ast_node_t *expr_node,
 }
 
 /**
+ * @brief Naplní zástupný typ člena přístupného přes tečku bez závorek
+ *        (x.length, d.toInt, d.toString, d.floor, l.head, l.tail,
+ *        (1 to 5).toList). Skutečný typ se ověří v
+ *        check_binary_operation_types podle typu přijímače.
+ * @param member_id Identifikátor člena za tečkou.
+ * @param placeholder Ukazatel na zástupný typ člena.
+ * @return true, pokud identifikátor odpovídá známému členu, jinak false.
+ */
+static bool dot_member_placeholder(const char *member_id,
+                                   ifj26_type_t *placeholder) {
+  if (member_id == NULL || placeholder == NULL) {
+    return false;
+  }
+
+  if (strcmp(member_id, "toString") == 0) {
+    *placeholder = (ifj26_type_t){.type = TYPE_STRING, .is_list = false};
+  } else if (strcmp(member_id, "length") == 0 ||
+             strcmp(member_id, "toInt") == 0) {
+    *placeholder = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
+  } else if (strcmp(member_id, "floor") == 0) {
+    *placeholder = (ifj26_type_t){.type = TYPE_DOUBLE, .is_list = false};
+  } else if (strcmp(member_id, "head") == 0) {
+    *placeholder = (ifj26_type_t){.type = TYPE_ANY, .is_list = false};
+  } else if (strcmp(member_id, "tail") == 0 ||
+             strcmp(member_id, "toList") == 0) {
+    *placeholder = (ifj26_type_t){.type = TYPE_ANY, .is_list = true};
+  } else {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * @brief Rekurzivní kontrola výrazu a odvození jeho typu (literály, unární
  *        a binární výrazy, konstruktor List, indexace seznamu, volání funkce,
  *        if výraz a proměnné; přepisuje identifikátory na code_gen_name
@@ -1298,6 +1410,31 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
           check_expr(ctx, expr_node->as.expr.unary.operand, result_type),
           "Failed to check unary expression operand.");
 
+      // Kontrola typu unárního operátoru
+      if (expr_node->as.expr.operator_type == TOK_SUB) {
+        // Unární mínus je povolen pouze pro číselné operandy
+        if (result_type->is_list || (result_type->type != TYPE_INT &&
+                                     result_type->type != TYPE_DOUBLE)) {
+          CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                            "Unary operator '-' requires a numeric operand, "
+                            "got '%s'.",
+                            ifj26_type2str(result_type));
+        }
+      } else if (expr_node->as.expr.operator_type == TOK_NOT) {
+        // Unární negace je povolena pouze pro Bool operand
+        if (result_type->is_list || result_type->type != TYPE_BOOL) {
+          CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                            "Unary operator '!' requires a Bool operand, got "
+                            "'%s'.",
+                            ifj26_type2str(result_type));
+        }
+        *result_type = (ifj26_type_t){.type = TYPE_BOOL, .is_list = false};
+      } else {
+        LOG_ERR(IFJ_EINTERNAL, "Unknown unary operator type: %d",
+                expr_node->as.expr.operator_type);
+        return IFJ_EINTERNAL;
+      }
+
     } else {
       // Vynulování výsledného typu, aby se nepřebíral příznak is_list z
       // předchozího použití (symtable_data_t data se v check_block recyklují
@@ -1317,9 +1454,21 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
         CHECK_ERR_LOG_RET(
             check_expr(ctx, expr_node->as.expr.binary.lhs, &lhs_type),
             "Failed to check binary expression left-hand side.");
-        CHECK_ERR_LOG_RET(
-            check_expr(ctx, expr_node->as.expr.binary.rhs, &rhs_type),
-            "Failed to check binary expression right-hand side.");
+
+        // Člen bez závorek volaný přes tečku (x.length, d.toInt, d.toString,
+        // d.floor, l.head, l.tail, (1 to 5).toList): pravá strana se
+        // nevyhledává jako proměnná, zástupný typ se ověří v
+        // check_binary_operation_types podle typu přijímače
+        if (expr_node->as.expr.operator_type == TOK_DOT &&
+            expr_node->as.expr.binary.rhs->type == AST_VAR &&
+            dot_member_placeholder(expr_node->as.expr.binary.rhs->as.var.id,
+                                   &rhs_type)) {
+          // Identifikátor člena zůstává beze změny (používá ho generování kódu)
+        } else {
+          CHECK_ERR_LOG_RET(
+              check_expr(ctx, expr_node->as.expr.binary.rhs, &rhs_type),
+              "Failed to check binary expression right-hand side.");
+        }
 
         CHECK_ERR_LOG_RET(check_binary_operation_types(
                               expr_node, &lhs_type, &rhs_type, result_type,
@@ -1545,35 +1694,61 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
       CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Variable AST node has NULL id.");
     }
 
-    if (strcmp(expr_node->as.var.id, "toString") == 0) {
-      *result_type = (ifj26_type_t){.type = TYPE_STRING, .is_list = false};
-    } else if (strcmp(expr_node->as.var.id, "length") == 0) {
-      *result_type = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
-    } else if (strcmp(expr_node->as.var.id, "toInt") == 0) {
-      *result_type = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
-    } else if (strcmp(expr_node->as.var.id, "floor") == 0) {
-      *result_type = (ifj26_type_t){.type = TYPE_DOUBLE, .is_list = false};
-    } else if (strcmp(expr_node->as.var.id, "List") == 0) {
-      // Klíčové slovo List mimo volání konstruktoru (např. List.range)
-      *result_type = (ifj26_type_t){.type = TYPE_ANY, .is_list = true};
-    } else if (strcmp(expr_node->as.var.id, "head") == 0) {
-      // Členy bez parametrů volané přes tečku - skutečný typ se určí v
-      // check_binary_operation_types podle typu příjemce
-      *result_type = (ifj26_type_t){.type = TYPE_ANY, .is_list = false};
-    } else if (strcmp(expr_node->as.var.id, "tail") == 0 ||
-               strcmp(expr_node->as.var.id, "toList") == 0) {
+    if (strcmp(expr_node->as.var.id, "List") == 0) {
+      // Klíčové slovo List na levé straně tečky (přijímač statické metody
+      // List.range)
       *result_type = (ifj26_type_t){.type = TYPE_ANY, .is_list = true};
     } else {
       symtable_data_t var_data = {0};
-      CHECK_ERR_LOG_RET(
-          search_variable_in_stack(ctx, expr_node->as.var.id, &var_data),
-          "Failed to find variable '%s' in local scopes.",
-          expr_node->as.var.id);
+      IFJ_ERR var_err =
+          search_variable_in_stack(ctx, expr_node->as.var.id, &var_data);
 
-      *result_type = var_data.var.type;
-      free(expr_node->as.var.id);
-      expr_node->as.var.id = strdup(var_data.var.code_gen_name);
-      CHECK_MEM_ERR(expr_node->as.var.id);
+      if (var_err != IFJ_ESEM_UNDEF && CHECK_ERR(var_err)) {
+        LOG_ERR(var_err, "Failed to search variable '%s' in local scopes.",
+                expr_node->as.var.id);
+        return var_err;
+      }
+
+      if (var_err == IFJ_SUCCESS) {
+        *result_type = var_data.var.type;
+        free(expr_node->as.var.id);
+        expr_node->as.var.id = strdup(var_data.var.code_gen_name);
+        CHECK_MEM_ERR(expr_node->as.var.id);
+      } else {
+        // Není to proměnná - jedná se buď o odkaz na funkci bez seznamu
+        // parametrů (PARAMLISTS: volání pouhým uvedením jména), nebo o
+        // nedefinovaný identifikátor
+        symtable_data_t *func_data = NULL;
+        IFJ_ERR find_err = symtable_find(ctx->global_symtable,
+                                         expr_node->as.var.id, &func_data);
+
+        if (CHECK_ERR(find_err) || func_data == NULL ||
+            !func_data->is_function ||
+            func_data->func.param_list_count != 0) {
+          // Částečná aplikace není podporována, odkaz bez závorek je povolen
+          // pouze pro funkce bez seznamu parametrů
+          LOG_ERR(IFJ_ESEM_UNDEF,
+                  "Variable or parameterless function '%s' not found in symbol "
+                  "tables.",
+                  expr_node->as.var.id);
+          return IFJ_ESEM_UNDEF;
+        }
+
+        if (func_data->func.return_type.type == TYPE_UNRESOLVED) {
+          CHECK_ERR_LOG_RET(check_function(ctx->global_symtable, func_data),
+                            "Failed to check function '%s'.",
+                            expr_node->as.var.id);
+        }
+
+        *result_type = func_data->func.return_type;
+
+        // Převod na volání funkce pro generování kódu (id je v unionu na stejném
+        // místě pro var i func_call, proto se přenáší bez kopírování)
+        expr_node->type = AST_FUNC_CALL;
+        expr_node->as.func_call.id = expr_node->as.var.id;
+        expr_node->as.func_call.param_lists = NULL;
+        expr_node->as.func_call.param_lists_cnt = 0;
+      }
     }
   }
   expr_node->inferred_type =
@@ -1620,9 +1795,23 @@ static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node,
                            "statement or expression is not of type Bool.");
   }
 
-  CHECK_ERR_LOG_RET(
-      check_block(ctx, if_node->as.if_st.body, result_type, false),
-      "Failed to check then block in if statement.");
+  // Kontrola těla větve then
+  ifj26_type_t branch_type = {0};
+  err = check_if_branch(ctx, if_node->as.if_st.body, &branch_type);
+  CHECK_ERR_LOG_RET(err, "Failed to check then block in if statement.");
+
+  // Kontrola těla všech větví else if
+  for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
+    err = check_if_branch(ctx, if_node->as.if_st.else_if[i]->as.else_if_st.body,
+                          &branch_type);
+    CHECK_ERR_LOG_RET(err, "Failed to check else if branch in if statement.");
+  }
+
+  // Kontrola těla větve else
+  if (if_node->as.if_st.else_st != NULL) {
+    err = check_if_branch(ctx, if_node->as.if_st.else_st, &branch_type);
+    CHECK_ERR_LOG_RET(err, "Failed to check else block in if statement.");
+  }
 
   *result_type = (ifj26_type_t){
       .type = TYPE_UNIT,
@@ -1736,16 +1925,6 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
         goto cleanup;
       }
 
-      // Seznamy jsou nemodifikovatelné, lze je ukládat pouze do val
-      if (data.var.type.is_list && stmt->as.def.mut) {
-        err = IFJ_ESEM_TYPE;
-        LOG_ERR(err,
-                "List cannot be stored in a mutable variable '%s' at index "
-                "%ld, use val instead",
-                stmt->as.def.id, i);
-        goto cleanup;
-      }
-
       // Prázdný seznam vyžaduje explicitně uvedený typ seznamu
       if (data.var.type.is_list && data.var.type.type == TYPE_UNRESOLVED) {
         if (!stmt->as.def.type.is_list ||
@@ -1817,6 +1996,9 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
                            "definition at index %ld",
                            i);
       }
+
+      // Definice proměnné je příkaz, výsledkem bloku je ()
+      *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
     } else if (stmt->type == AST_ASSIGN) {
       // Kontrola přiřazení
       if (stmt->as.assign.id == NULL || stmt->as.assign.rhs == NULL) {
@@ -1868,6 +2050,9 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
             stmt->as.assign.id, i, ifj26_type2str(&data.var.type),
             ifj26_type2str(&stmt->as.assign.rhs->inferred_type));
       }
+
+      // Přiřazení je příkaz, výsledkem bloku je ()
+      *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
     } else if (stmt->type == AST_FUNC_RET) {
       ifj26_type_t return_type = {0};
       ctx->current_func->has_return_stmt = true;
@@ -1943,13 +2128,16 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
             ifj26_type2str(&return_type));
       }
     } else if (stmt->type == AST_IF) {
-      if (i == block_node->as.block.commands_cnt - 1) {
-        // Poslední příkaz v bloku je if, zkontrolujeme jeho typ
+      if (i == block_node->as.block.commands_cnt - 1 &&
+          stmt->as.if_st.else_st != NULL) {
+        // Poslední příkaz v bloku je if s větví else, jde o výraz podle
+        // pravidla 3 a jeho typ je výsledkem bloku
         err = check_if_expr(ctx, stmt, result_type);
         CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to check if statement at index %ld", i);
       } else {
-        // Pokud if není poslední příkaz, jeho typ se nevyužívá
+        // Jinak jde o podmíněný příkaz; chybí-li větev else (BOOLTHEN),
+        // chybějící větev odpovídá větví ()
         err = check_if(ctx, stmt, result_type);
         CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to check if statement at index %ld", i);
@@ -2259,7 +2447,6 @@ static IFJ_ERR check_function(symtable_t *functions_table,
   ctx.global_symtable = functions_table;
   ctx.current_func = &func_data->func;
   ctx.current_scope_level = 0;
-  ctx.in_untyped_recursion = false;
   CHECK_ERR_LOG_RET(
       stack_init(&ctx.local_scopes),
       "Failed to initialize local scopes stack for function '%s'.",
