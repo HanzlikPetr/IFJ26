@@ -904,18 +904,19 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR check_if_expr_is_bool(sem_ctx_t *ctx, ast_node_t *if_node) {
-  CHECK_ARGS_NULL_RET(ctx, if_node);
+static IFJ_ERR check_if_expr_is_bool(sem_ctx_t *ctx, ast_node_t *if_expr) {
+  CHECK_ARGS_NULL_RET(ctx, if_expr);
 
-  if (if_node->type != AST_IF) {
-    LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type: %d (expected AST_IF)",
-            if_node->type);
+  if (if_expr->type != AST_EXPR && if_expr->type != AST_LITERAL &&
+      if_expr->type != AST_FUNC_CALL && if_expr->type != AST_VAR) {
+    LOG_ERR(IFJ_EINTERNAL, "Invalid condition expression node type: %d",
+            if_expr->type);
     return IFJ_EINTERNAL;
   }
 
   // Kontrola typu podmínky
   ifj26_type_t cond_type = {0};
-  IFJ_ERR err = check_expr(ctx, if_node->as.if_st.expr, &cond_type);
+  IFJ_ERR err = check_expr(ctx, if_expr, &cond_type);
   CHECK_ERR_LOG_RET(err,
                     "Failed to check condition expression in if statement.");
 
@@ -946,7 +947,7 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   }
 
   // Kontrola typu podmínky
-  err = check_if_expr_is_bool(ctx, if_node);
+  err = check_if_expr_is_bool(ctx, if_node->as.if_st.expr);
   CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
                          "or expresion is not type boolean.");
 
@@ -1117,13 +1118,13 @@ static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node, ifj26_type_t *resul
   }
 
   // Kontrola typu podmínky (if)
-  err = check_if_expr_is_bool(ctx, if_node);
+  err = check_if_expr_is_bool(ctx, if_node->as.if_st.expr);
   CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
                          "or expresion is not type boolean.");
 
   // Kontrola typu podmímnky (else if)
   for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
-    err = check_if_expr_is_bool(ctx, if_node->as.if_st.else_if[i]);
+    err = check_if_expr_is_bool(ctx, if_node->as.if_st.else_if[i]->as.else_if_st.expr);
     CHECK_ERR_LOG_RET(err, "Failed to check condition expression in else if "
                            "statement or expresion is not type boolean.");
   }
@@ -1208,7 +1209,8 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       if (stmt->as.def.rhs->type == AST_LITERAL ||
           stmt->as.def.rhs->type == AST_EXPR ||
           stmt->as.def.rhs->type == AST_FUNC_CALL ||
-          stmt->as.def.rhs->type == AST_IF) {
+          stmt->as.def.rhs->type == AST_IF ||
+          stmt->as.def.rhs->type == AST_VAR) {
         err = check_expr(ctx, stmt->as.def.rhs, &data.var.type);
         CHECK_ERR_LOG_GOTO(
             err, cleanup,
@@ -1400,7 +1402,7 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       }
     } else if (stmt->type == AST_WHILE) {
       // Kontrola typu podmínky cyklu while
-      err = check_if_expr_is_bool(ctx, stmt);
+      err = check_if_expr_is_bool(ctx, stmt->as.while_st.expr);
       CHECK_ERR_LOG_GOTO(
           err, cleanup,
           "Failed to check condition expression in while loop at index %ld", i);
