@@ -519,10 +519,10 @@ static IFJ_ERR symtable_fill_user_defined_functions(symtable_t *table,
   bool has_main_function = false;
 
   if (root->type != AST_ROOT) {
-    // Pokud kořenový uzel AST není typu AST_ROOT, nevracíme chybu. Logujeme
-    // upozornění a vracíme IFJ_SUCCESS, aby se program mohl dál zpracovávat.
+    // Kořenový uzel AST musí být typu AST_ROOT, jinak jde o interní chybu
+    // (check_functions() kontroluje stejnou podmínku stejným způsobem).
     LOG_ERR(IFJ_EINTERNAL, "Invalid AST root node type: %d", root->type);
-    return IFJ_SUCCESS;
+    return IFJ_EINTERNAL;
   }
 
   for (size_t i = 0; i < root->as.root.funcs_cnt; i++) {
@@ -632,12 +632,25 @@ IFJ_ERR symtable_fill_funcitons(symtable_t *table, const ast_node_t *root) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro uvolnění lokální tabulky symbolů ze zásobníku
+ *        (callback pro stack_deep_dtor()).
+ * @param data Ukazatel na tabulku symbolů (symtable_t *).
+ * @return Vždy vrací IFJ_SUCCESS.
+ */
 static IFJ_ERR destroy_local_symtable_stack(void *data) {
   symtable_destroy((symtable_t *)data);
   free(data);
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro kontrolu kompatibility typů (přímá shoda, TYPE_ANY,
+ *        prázdný seznam, implicitní konverze z Int na Double).
+ * @param expected Očekávaný typ.
+ * @param actual Skutečný typ.
+ * @return true při kompatibilitě typů, jinak false.
+ */
 static bool types_compatible(const ifj26_type_t *expected,
                              const ifj26_type_t *actual) {
   if (expected == NULL || actual == NULL) {
@@ -666,31 +679,15 @@ static bool types_compatible(const ifj26_type_t *expected,
          expected->type == TYPE_DOUBLE && actual->type == TYPE_INT;
 }
 
-static char *ifj26_type2str(const ifj26_type_t *type) {
-  if (type == NULL) {
-    return "NULL";
-  }
-
-  switch (type->type) {
-  case TYPE_UNRESOLVED:
-    return type->is_list ? "List<Unresolved>" : "Unresolved";
-  case TYPE_UNIT:
-    return type->is_list ? "List<Unit>" : "Unit";
-  case TYPE_INT:
-    return type->is_list ? "List<Int>" : "Int";
-  case TYPE_DOUBLE:
-    return type->is_list ? "List<Double>" : "Double";
-  case TYPE_STRING:
-    return type->is_list ? "List<String>" : "String";
-  case TYPE_BOOL:
-    return type->is_list ? "List<Bool>" : "Bool";
-  case TYPE_ANY:
-    return type->is_list ? "List<Any>" : "Any";
-  default:
-    return type->is_list ? "List<Unknown>" : "Unknown";
-  }
-}
-
+/**
+ * @brief Pomocná funkce pro vytvoření unikátního názvu pro generování kódu
+ *        ve tvaru "<base_name>$<scope_level>".
+ * @param ctx Kontext sémantické analýzy.
+ * @param base_name Původní název proměnné.
+ * @return Nově alokovaný řetězec s unikátním názvem, je nutné jej uvolnit
+ *         pomocí free(), nebo NULL při chybě (neplatné argumenty nebo
+ *         neúspěšná alokace paměti).
+ */
 static char *gen_code_gen_name(sem_ctx_t *ctx, const char *base_name) {
   if (ctx == NULL || base_name == NULL) {
     LOG_ERR(IFJ_EINTERNAL, "Invalid arguments to gen_code_gen_name");
@@ -713,6 +710,12 @@ static char *gen_code_gen_name(sem_ctx_t *ctx, const char *base_name) {
   return code_gen_name;
 }
 
+/**
+ * @brief Pomocná funkce pro získání typu literálu z AST uzlu (is_list je
+ *        vždy false, seznam nemůže být literál).
+ * @param literal AST uzel literálu (AST_LITERAL).
+ * @return Typ literálu.
+ */
 static ifj26_type_t get_type_from_literal(ast_node_t *literal) {
   ifj26_type_t literal_type = {0};
   literal_type.type = literal->as.literal.type;
@@ -721,6 +724,11 @@ static ifj26_type_t get_type_from_literal(ast_node_t *literal) {
   return literal_type;
 }
 
+/**
+ * @brief Pomocná funkce pro opuštění lokálního bloku (odebere a uvolní vrchní
+ *        tabulku symbolů a sníží úroveň zanoření).
+ * @param ctx Kontext sémantické analýzy.
+ */
 static void pop_local_symtable(sem_ctx_t *ctx) {
   if (ctx == NULL) {
     LOG_ERR(IFJ_EINTERNAL, "Invalid argument to pop_local_symtable");
@@ -736,6 +744,16 @@ static void pop_local_symtable(sem_ctx_t *ctx) {
   ctx->current_scope_level--;
 }
 
+/**
+ * @brief Pomocná funkce pro vrácení tabulek symbolů zpět na zásobník lokálních
+ *        tabulek symbolů v opačném pořadí (obnovení původního pořadí).
+ * @param ctx Kontext sémantické analýzy.
+ * @param local_symtables Pole ukazatelů na lokální tabulky symbolů.
+ * @param count Počet tabulek symbolů v poli.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatné tabulky.
+ * @return Chybový kód ze zásobníku při neúspěšném vložení tabulky.
+ * @return IFJ_SUCCESS při úspěšném vložení všech tabulek symbolů.
+ */
 static IFJ_ERR push_local_symtables(sem_ctx_t *ctx,
                                     symtable_t *local_symtables[], int count) {
   if (ctx == NULL) {
@@ -758,6 +776,17 @@ static IFJ_ERR push_local_symtables(sem_ctx_t *ctx,
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro vyhledání proměnné v zásobníku lokálních tabulek
+ *        symbolů od nejvnitřnějšího bloku po vnější (odebrané tabulky se
+ *        vrátí zpět na zásobník).
+ * @param ctx Kontext sémantické analýzy.
+ * @param var_name Název hledané proměnné.
+ * @param data Ukazatel na nalezená data proměnné.
+ * @return IFJ_ESEM_UNDEF, pokud proměnná není v žádném lokálním bloku.
+ * @return IFJ_EINTERNAL, pokud je zásobník lokálních bloků prázdný.
+ * @return IFJ_SUCCESS při úspěšném vyhledání proměnné.
+ */
 static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
                                         symtable_data_t *data) {
   CHECK_ARGS_NULL_RET(ctx, var_name, data);
@@ -772,6 +801,9 @@ static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
   CHECK_ERR_LOG_RET(err, "Failed to check if local scopes stack is empty.");
   if (is_empty) {
     free(remove_from_stack_symt_arr);
+    LOG_ERR(IFJ_EINTERNAL, "Local scopes stack is empty while searching for "
+                           "variable '%s'.",
+            var_name);
     return IFJ_EINTERNAL; // Stack is empty, variable not found
   }
 
@@ -813,6 +845,21 @@ static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
   return IFJ_ESEM_UNDEF; // Variable not found
 }
 
+/**
+ * @brief Pomocná funkce pro kontrolu typů binární operace a odvození typu
+ *        výsledku (aritmetické, relační a logické operace, konkatenace ++
+ *        a metody volané přes operátor tečky).
+ * @param expr_node AST uzel binárního výrazu (AST_EXPR).
+ * @param lhs_type Typ levého operandu.
+ * @param rhs_type Typ pravého operandu.
+ * @param result_type Ukazatel na výsledný typ operace.
+ * @param dot_identifier Identifikátor metody u operátoru tečky, jinak NULL.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru, unárním výrazu nebo
+ *         neznámém operátoru.
+ * @return IFJ_ESEM_TYPE při nekompatibilních typech operandů.
+ * @return IFJ_ESEM_UNDEF při volání neznámé metody přes operátor tečky.
+ * @return IFJ_SUCCESS při úspěšné kontrole typů operace.
+ */
 static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                                             ifj26_type_t *lhs_type,
                                             ifj26_type_t *rhs_type,
@@ -994,6 +1041,15 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro kontrolu, zda je výraz podmínky typu Bool.
+ *
+ * @param ctx Kontext sémantické analýzy.
+ * @param if_expr AST uzel výrazu podmínky.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatném AST uzlu.
+ * @return IFJ_ESEM_TYPE, pokud výraz podmínky není typu Bool.
+ * @return IFJ_SUCCESS při úspěšné kontrole podmínky.
+ */
 static IFJ_ERR check_if_expr_is_bool(sem_ctx_t *ctx, ast_node_t *if_expr) {
   CHECK_ARGS_NULL_RET(ctx, if_expr);
 
@@ -1019,6 +1075,17 @@ static IFJ_ERR check_if_expr_is_bool(sem_ctx_t *ctx, ast_node_t *if_expr) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro kontrolu if použitého jako výraz (musí mít větev
+ *        else a žádnou větev else if, typem výrazu je typ bloku then).
+ * @param ctx Kontext sémantické analýzy.
+ * @param if_node AST uzel if výrazu (AST_IF).
+ * @param result_type Ukazatel na výsledný typ if výrazu.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatné struktuře
+ *         AST uzlu.
+ * @return IFJ_ESEM_TYPE při nekompatibilních typech bloků then a else.
+ * @return IFJ_SUCCESS při úspěšné kontrole if výrazu.
+ */
 static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
                              ifj26_type_t *result_type) {
   CHECK_ARGS_NULL_RET(ctx, if_node);
@@ -1039,7 +1106,7 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   // Kontrola typu podmínky
   err = check_if_expr_is_bool(ctx, if_node->as.if_st.expr);
   CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
-                         "or expresion is not type boolean.");
+                         "or expression is not of type Bool.");
 
   // Kontrola bloků then a else
   ifj26_type_t types_array[2] = {
@@ -1196,6 +1263,20 @@ static IFJ_ERR check_list_method_call(sem_ctx_t *ctx, ast_node_t *expr_node,
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Rekurzivní kontrola výrazu a odvození jeho typu (literály, unární
+ *        a binární výrazy, konstruktor List, indexace seznamu, volání funkce,
+ *        if výraz a proměnné; přepisuje identifikátory na code_gen_name
+ *        a ukládá odvozený typ do inferred_type AST uzlu).
+ * @param ctx Kontext sémantické analýzy.
+ * @param expr_node AST uzel výrazu.
+ * @param result_type Ukazatel na odvozený typ výrazu.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatném AST uzlu.
+ * @return IFJ_ESEM_UNDEF při použití nedefinované funkce nebo proměnné.
+ * @return IFJ_ESEM_ARGS při špatném počtu nebo typu argumentů funkce.
+ * @return IFJ_ESEM_TYPE při nekompatibilních typech ve výrazu.
+ * @return IFJ_SUCCESS při úspěšné kontrole výrazu.
+ */
 static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
                           ifj26_type_t *result_type) {
   CHECK_ARGS_NULL_RET(ctx, expr_node, result_type);
@@ -1500,6 +1581,16 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro kontrolu podmíněného příkazu if (kontrola
+ *        podmínek if a else if na typ Bool, výsledkem je vždy typ Unit).
+ * @param ctx Kontext sémantické analýzy.
+ * @param if_node AST uzel podmíněného příkazu (AST_IF).
+ * @param result_type Ukazatel na výsledný typ (vždy Unit).
+ * @return IFJ_EINTERNAL při poslání NULL pointeru, neplatném AST uzlu nebo
+ *         neplatné struktuře AST uzlu.
+ * @return IFJ_SUCCESS při úspěšné kontrole podmíněného příkazu.
+ */
 static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node,
                         ifj26_type_t *result_type) {
   CHECK_ARGS_NULL_RET(ctx, if_node);
@@ -1519,14 +1610,14 @@ static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node,
   // Kontrola typu podmínky (if)
   err = check_if_expr_is_bool(ctx, if_node->as.if_st.expr);
   CHECK_ERR_LOG_RET(err, "Failed to check condition expression in if statement "
-                         "or expresion is not type boolean.");
+                         "or expression is not of type Bool.");
 
-  // Kontrola typu podmímnky (else if)
+  // Kontrola podmínky (else if)
   for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
     err = check_if_expr_is_bool(
         ctx, if_node->as.if_st.else_if[i]->as.else_if_st.expr);
     CHECK_ERR_LOG_RET(err, "Failed to check condition expression in else if "
-                           "statement or expresion is not type boolean.");
+                           "statement or expression is not of type Bool.");
   }
 
   CHECK_ERR_LOG_RET(
@@ -1540,6 +1631,20 @@ static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node,
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Kontrola bloku příkazů (tělo funkce s tabulkou symbolů parametrů
+ *        nebo vnořený blok s vlastní tabulkou symbolů; definice proměnných,
+ *        přiřazení, return, if, while, for a výrazy). Po ukončení se lokální
+ *        tabulka symbolů uvolní a obnoví se předchozí úroveň zanoření.
+ * @param ctx Kontext sémantické analýzy.
+ * @param block_node AST uzel bloku (AST_BLOCK).
+ * @param result_type Ukazatel na výsledný typ bloku (typ posledního výrazu).
+ * @param is_function_body Příznak, zda jde o tělo funkce.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatném AST uzlu.
+ * @return IFJ_ESEM_IMMUT při zápisu do nemodifikovatelné proměnné.
+ * @return IFJ_ESEM_TYPE při nekompatibilních typech v bloku.
+ * @return IFJ_SUCCESS při úspěšné kontrole bloku.
+ */
 static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
                            ifj26_type_t *result_type, bool is_function_body) {
   CHECK_ARGS_NULL_RET(ctx, block_node, result_type);
@@ -1593,8 +1698,9 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
     // Procházíme jednotlivé příkazy v bloku a kontrolujeme je
     ast_node_t *stmt = block_node->as.block.commands[i];
     if (stmt == NULL) {
-      LOG_ERR(IFJ_EINTERNAL, "Null statement in block at index %ld", i);
-      return IFJ_EINTERNAL;
+      err = IFJ_EINTERNAL;
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Null statement in block at index %ld",
+                         i);
     }
 
     if (stmt->type == AST_DEF) {
@@ -1704,7 +1810,13 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       free(stmt->as.def.id);
       stmt->as.def.id = strdup(data.var.code_gen_name);
       free(data.var.code_gen_name);
-      CHECK_MEM_ERR_GOTO(stmt->as.def.id, cleanup);
+      if (stmt->as.def.id == NULL) {
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to copy code-generation name for variable "
+                           "definition at index %ld",
+                           i);
+      }
     } else if (stmt->type == AST_ASSIGN) {
       // Kontrola přiřazení
       if (stmt->as.assign.id == NULL || stmt->as.assign.rhs == NULL) {
@@ -1731,7 +1843,13 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
 
       free(stmt->as.assign.id);
       stmt->as.assign.id = strdup(data.var.code_gen_name);
-      CHECK_MEM_ERR_GOTO(stmt->as.assign.id, cleanup);
+      if (stmt->as.assign.id == NULL) {
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to copy code-generation name for variable "
+                           "in assignment at index %ld",
+                           i);
+      }
 
       err = check_expr(ctx, stmt->as.assign.rhs, result_type);
       CHECK_ERR_LOG_GOTO(err, cleanup,
@@ -1757,7 +1875,7 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       // Pokud má funkce return type, ale není explicitně určen, je to chyba
       if (!ctx->current_func->return_type_explicit) {
         err = IFJ_ESEM_TYPE;
-        CHECK_ERR_LOG_GOTO(IFJ_ESEM_TYPE, cleanup,
+        CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Function '%s' has a return type, but it is not "
                            "explicitly specified at index %ld",
                            ctx->current_func->node->as.func.id, i);
@@ -1858,7 +1976,13 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       for_range = for_gen->as.for_gen.range;
 
       loop_symtable = malloc(sizeof *loop_symtable);
-      CHECK_MEM_ERR_GOTO(loop_symtable, cleanup);
+      if (loop_symtable == NULL) {
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Memory allocation failed for for-loop scope at "
+                           "index %ld",
+                           i);
+      }
       err = symtable_init(loop_symtable);
       CHECK_ERR_LOG_GOTO(err, cleanup,
                          "Failed to initialize for-loop scope at index %ld", i);
@@ -1924,7 +2048,8 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       index_var_data.var.code_gen_name =
           gen_code_gen_name(ctx, stmt->as.for_st.gen->as.for_gen.id);
       if (index_var_data.var.code_gen_name == NULL) {
-        CHECK_ERR_LOG_GOTO(IFJ_EINTERNAL, cleanup,
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to generate code generation name for index "
                            "variable '%s' in for loop at index %ld",
                            stmt->as.for_st.gen->as.for_gen.id, i);
@@ -1945,7 +2070,8 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       if (stmt->as.for_st.gen->as.for_gen.id == NULL) {
         free(index_var_data.var.code_gen_name);
         index_var_data.var.code_gen_name = NULL;
-        CHECK_ERR_LOG_GOTO(IFJ_EINTERNAL, cleanup,
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
                            "Failed to copy code-generation name for index "
                            "variable at index %ld",
                            i);
@@ -2023,17 +2149,17 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       err = check_expr(ctx, stmt, result_type);
       CHECK_ERR_LOG_GOTO(err, cleanup,
                          "Failed to check literal statement at index %ld", i);
+    } else if (stmt->type == AST_VAR) {
+      err = check_expr(ctx, stmt, result_type);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to check variable expression at index %ld",
+                         i);
     } else {
       err = IFJ_EINTERNAL;
       CHECK_ERR_LOG_GOTO(err, cleanup,
                          "Unsupported AST node type in block at index %ld: %d",
                          i, stmt->type);
     }
-
-    // Zde by měla být implementována kontrola jednotlivých typů příkazů
-    // Například:
-    // else if (stmt->type == AST_WHILE) { ... }
-    // else { ... }
   }
 
 cleanup:
@@ -2051,6 +2177,15 @@ cleanup:
   return err;
 }
 
+/**
+ * @brief Pomocná funkce pro kontrolu těla funkce (blok příkazů nebo přímo
+ *        výraz, jehož typ je návratovým typem funkce).
+ * @param ctx Kontext sémantické analýzy.
+ * @param func_body AST uzel těla funkce.
+ * @param result_type Ukazatel na odvozený návratový typ funkce.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo neplatném AST uzlu.
+ * @return IFJ_SUCCESS při úspěšné kontrole těla funkce.
+ */
 static IFJ_ERR check_funciton_body(sem_ctx_t *ctx, ast_node_t *func_body,
                                    ifj26_type_t *result_type) {
   CHECK_ARGS_NULL_RET(ctx, func_body, result_type);
@@ -2077,6 +2212,19 @@ static IFJ_ERR check_funciton_body(sem_ctx_t *ctx, ast_node_t *func_body,
   return err;
 }
 
+/**
+ * @brief Kontrola uživatelem definované funkce (vložení parametrů do lokální
+ *        tabulky symbolů, kontrola těla, odvození návratového typu a detekce
+ *        přímé rekurze s neexplicitně určeným návratovým typem; již
+ *        zkontrolovaná funkce se přeskočí).
+ * @param functions_table Ukazatel na globální tabulku symbolů funkcí.
+ * @param func_data Ukazatel na data funkce z tabulky symbolů.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo chybě alokace paměti.
+ * @return IFJ_ESEM_TYPE při přímé rekurzi s neexplicitně určeným návratovým
+ *         typem, při nekompatibilitě odvozeného návratového typu nebo
+ *         v těle funkce.
+ * @return IFJ_SUCCESS při úspěšné kontrole funkce.
+ */
 static IFJ_ERR check_function(symtable_t *functions_table,
                               symtable_data_t *func_data) {
   CHECK_ARGS_NULL_RET(functions_table, func_data);
