@@ -11,7 +11,6 @@
 #include "scanner.h"
 #include "semantic_analy.h"
 #include "symtable.h"
-#include "printer_tree.h"
 
 int main() {
   scanner_t scanner = {0};
@@ -28,8 +27,6 @@ int main() {
   err = parser_parse(&parser, &root);
   CHECK_ERR_GOTO(err, cleanup);
 
-  ast_print(root);
-
   err = symtable_init(&functions_table);
   CHECK_ERR_GOTO(err, cleanup);
 
@@ -38,9 +35,6 @@ int main() {
 
   err = check_functions(root, &functions_table);
   CHECK_ERR_GOTO(err, cleanup);
-
-  // Vypis AST stromu
-  ast_print(root);
 
 cleanup:
   ast_free(root);
