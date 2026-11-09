@@ -145,6 +145,10 @@ static ifj26_type_t t_string(void) {
   return (ifj26_type_t){.type = TYPE_STRING, .is_list = false};
 }
 
+static ifj26_type_t t_bool(void) {
+  return (ifj26_type_t){.type = TYPE_BOOL, .is_list = false};
+}
+
 static ifj26_type_t t_unit(void) {
   return (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
 }
@@ -463,18 +467,20 @@ static void test_fill_main_only(void **state) {
   expect_fill(s, IFJ_SUCCESS);
 
   // Vestavěné funkce: print(value: any): Unit, readLine(): String,
-  // readInt(): Int, readDouble(): Double, toStr(value: any): String,
-  // toInt(value: String): Int, strLength(value: String): Int,
+  // readInt(): Int, readDouble(): Double, readBoolean(): Boolean,
+  // toStr(value: any): String, toInt(value: Double): Int,
+  // strLength(value: String): Int,
   // subStr(value: String, start: Int, end: Int): String,
   // ord(value: String, index: Int): Int, chr(code: Int): String
   expect_builtin_fn(&s->table, "print", t_unit(), 1, (ifj26_type_t[]){t_any()});
   expect_builtin_fn(&s->table, "readLine", t_string(), 0, NULL);
   expect_builtin_fn(&s->table, "readInt", t_int(), 0, NULL);
   expect_builtin_fn(&s->table, "readDouble", t_double(), 0, NULL);
+  expect_builtin_fn(&s->table, "readBoolean", t_bool(), 0, NULL);
   expect_builtin_fn(&s->table, "toStr", t_string(), 1,
                     (ifj26_type_t[]){t_any()});
   expect_builtin_fn(&s->table, "toInt", t_int(), 1,
-                    (ifj26_type_t[]){t_string()});
+                    (ifj26_type_t[]){t_double()});
   expect_builtin_fn(&s->table, "strLength", t_int(), 1,
                     (ifj26_type_t[]){t_string()});
   expect_builtin_fn(&s->table, "subStr", t_string(), 3,
@@ -983,13 +989,15 @@ static void test_check_if_expr_ok(void **state) {
            IFJ_SUCCESS, IFJ_SUCCESS);
 }
 
-static void test_check_if_expr_missing_else(void **state) {
+static void test_check_if_statement_missing_else_ok(void **state) {
+  // Zkrácený podmíněný příkaz bez větve else (BOOLTHEN) je legalní i jako
+  // poslední příkaz bloku, výsledkem bloku je ()
   sem_state_t *s = get_state(state);
   run_case(s,
            program(main_func(block_st(
                        if_st(lit_bool(true), block_st(END), NULL), END)),
                    END),
-           IFJ_SUCCESS, IFJ_ESEM_OTHER);
+           IFJ_SUCCESS, IFJ_SUCCESS);
 }
 
 static void test_check_if_expr_branch_mismatch(void **state) {
@@ -1313,8 +1321,10 @@ static void test_check_builtin_calls_ok(void **state) {
                      call("readLine", args(END), END)),
               def_st(false, "d", t_unresolved(),
                      call("readDouble", args(END), END)),
+              def_st(false, "b", t_unresolved(),
+                     call("readBoolean", args(END), END)),
               def_st(false, "i", t_unresolved(),
-                     call("toInt", args(lit_string("42"), END), END)),
+                     call("toInt", args(lit_double(42.5), END), END)),
               def_st(false, "l", t_unresolved(),
                      call("strLength", args(lit_string("abc"), END), END)),
               def_st(false, "sub", t_unresolved(),
@@ -1366,14 +1376,24 @@ static void test_check_builtin_wrong_arg_count(void **state) {
 static void test_check_builtin_wrong_arg_type(void **state) {
   sem_state_t *s = get_state(state);
 
-  // toInt(1) - očekáván String
+  // toInt("a") - očekáváno Double, String nelze implicitně převést
+  run_case(s,
+           program(main_func(block_st(
+                       def_st(false, "n", t_unresolved(),
+                              call("toInt", args(lit_string("a"), END), END)),
+                       END)),
+                   END),
+           IFJ_SUCCESS, IFJ_ESEM_ARGS);
+  reset_state(s);
+
+  // toInt(1) - Int se implicitně převede na Double
   run_case(s,
            program(main_func(block_st(
                        def_st(false, "n", t_unresolved(),
                               call("toInt", args(lit_int(1), END), END)),
                        END)),
                    END),
-           IFJ_SUCCESS, IFJ_ESEM_ARGS);
+           IFJ_SUCCESS, IFJ_SUCCESS);
   reset_state(s);
 
   // subStr(1, 2, 3) - první parametr má být String
@@ -1506,7 +1526,7 @@ static void test_check_lists_ok(void **state) {
 }
 
 static void test_check_list_in_var(void **state) {
-  // Seznam lze ukládat pouze do val
+  // Nemodifikovatelný je samotný typ List, odkaz na něj může být i var
   sem_state_t *s = get_state(state);
   run_case(s,
            program(main_func(block_st(
@@ -1514,7 +1534,7 @@ static void test_check_list_in_var(void **state) {
                               call("List", args(lit_int(1), END), END)),
                        END)),
                    END),
-           IFJ_SUCCESS, IFJ_ESEM_TYPE);
+           IFJ_SUCCESS, IFJ_SUCCESS);
 }
 
 static void test_check_empty_list_without_annotation(void **state) {
@@ -1705,37 +1725,37 @@ static void test_check_list_methods_ok(void **state) {
       program(main_func(block_st(
                   def_st(false, "lst", t_unresolved(),
                          call("List", args(lit_int(1), lit_int(2), END), END)),
-                       // lst.head -> Int
+                  // lst.head -> Int
                   def_st(false, "h", t_unresolved(),
                          bin(TOK_DOT, var("lst"), var("head"))),
-                       // lst.tail -> List[Int]
+                  // lst.tail -> List[Int]
                   def_st(false, "t", t_unresolved(),
                          bin(TOK_DOT, var("lst"), var("tail"))),
-                       // lst.drop(1) -> List[Int]
+                  // lst.drop(1) -> List[Int]
                   def_st(false, "d", t_unresolved(),
                          bin(TOK_DOT, var("lst"),
                              call("drop", args(lit_int(1), END), END))),
-                       // lst.take(1) -> List[Int]
+                  // lst.take(1) -> List[Int]
                   def_st(false, "k", t_unresolved(),
                          bin(TOK_DOT, var("lst"),
                              call("take", args(lit_int(1), END), END))),
-                       // lst.slice(0, 1) -> List[Int]
+                  // lst.slice(0, 1) -> List[Int]
                   def_st(false, "sl", t_unresolved(),
                          bin(TOK_DOT, var("lst"),
                              call("slice", args(lit_int(0), lit_int(1), END),
                                   END))),
-                       // List.range(1, 5) -> List[Int]
+                  // List.range(1, 5) -> List[Int]
                   def_st(false, "r", t_unresolved(),
                          bin(TOK_DOT, var("List"),
                              call("range", args(lit_int(1), lit_int(5), END),
                                   END))),
-                       // List.range(1, 5, 2) -> List[Int]
+                  // List.range(1, 5, 2) -> List[Int]
                   def_st(false, "r2", t_unresolved(),
                          bin(TOK_DOT, var("List"),
                              call("range",
                                   args(lit_int(1), lit_int(5), lit_int(2), END),
                                   END))),
-                       // (1 to 3).toList -> List[Int]
+                  // (1 to 3).toList -> List[Int]
                   def_st(false, "tl", t_unresolved(),
                          bin(TOK_DOT, bin(TOK_TO, lit_int(1), lit_int(3)),
                              var("toList"))),
@@ -2003,7 +2023,7 @@ int main(void) {
       // Podmínky if a cykly while
       cmocka_unit_test_setup_teardown(test_check_if_expr_ok, sem_setup,
                                       sem_teardown),
-      cmocka_unit_test_setup_teardown(test_check_if_expr_missing_else,
+      cmocka_unit_test_setup_teardown(test_check_if_statement_missing_else_ok,
                                       sem_setup, sem_teardown),
       cmocka_unit_test_setup_teardown(test_check_if_expr_branch_mismatch,
                                       sem_setup, sem_teardown),
