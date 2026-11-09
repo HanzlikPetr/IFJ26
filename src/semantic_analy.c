@@ -1923,8 +1923,12 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
                   // Unit, vysledek se ignoruje
       }
 
+      // Typ návratového výrazu se uloží vždy, aby konečná kontrola typů ve
+      // funkci pracovala s typem návratové hodnoty i u funkcí s explicitně
+      // určeným návratovým typem (příkazy jako for či if jinak výsledek
+      // přepíší na Unit)
+      *result_type = return_type;
       if (ctx->current_func->return_type.type == TYPE_UNRESOLVED) {
-        *result_type = return_type;
         ctx->current_func->return_type = return_type;
       }
       if (!types_compatible(&ctx->current_func->return_type, &return_type)) {
