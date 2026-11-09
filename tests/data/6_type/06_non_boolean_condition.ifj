@@ -5,3 +5,4 @@ import ifj26.*
   val x = 1
   if x then
     print(x)
+  return
