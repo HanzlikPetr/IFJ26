@@ -9,6 +9,7 @@
 #define SYMTABLE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "error.h"
 
@@ -64,7 +65,7 @@ typedef struct {
  * @brief Struktura pro seznam parametrů funkce.
  */
 typedef struct {
-  int count; /**< Počet parametrů */
+  size_t count; /**< Počet parametrů */
   ifj26_type_t *types; /**< Pole typů parametrů */
 } param_list_t;
 
@@ -82,7 +83,7 @@ typedef struct {
   bool has_return_stmt; /**< Flag, true = funkce má return statement, false =
                            funkce nemá return statement */
   ast_node_t *node; /**< Ukazatel na AST uzel funkce, pokud je k dispozici */
-  int param_list_count; /**< Počet seznamu parametrů funkce */
+  size_t param_list_count; /**< Počet seznamu parametrů funkce */
   param_list_t **param_list; /**< Pole ukazatelů na seznamy parametrů funkce */
 } func_data_t;
 
