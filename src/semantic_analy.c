@@ -3,6 +3,16 @@
  * @brief IFJ26 - Implementace sémantické analýzy.
  *
  * @author xhanzlp00 Petr Hanzlík
+ *
+ * Sémantické kontroly rozšíření LISTS (kontrola prvků konstruktoru List,
+ * explicitní typ prázdného seznamu, povinné val, členské metody volané přes
+ * tečku, indexace, konkatenace ++ a seznam jako zdroj generátoru for) byly
+ * vygenerovány za pomoci modelu GLM-5.3 (via opencode) na základě promptu:
+ * "Add semantic checks for the LISTS extension: require an explicit List type
+ * annotation for empty lists, allow lists only in val definitions, type-check
+ * List members called with dot (head, tail, toList, drop, take, slice,
+ * List.range), list indexing lst(i) and list concatenation ++, and fix the
+ * related List constructor type-inference bugs."
  */
 
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
@@ -639,7 +649,15 @@ static bool types_compatible(const ifj26_type_t *expected,
     return true;
   }
 
-  if (expected->type == TYPE_ANY && expected->is_list == actual->is_list) {
+  // TYPE_ANY (např. parametry print a toStr) akceptuje libovolný typ včetně
+  // seznamů
+  if (expected->type == TYPE_ANY) {
+    return true;
+  }
+
+  // Prázdný seznam (typ prvků není určen) je kompatibilní s jakýmkoli
+  // očekávaným typem seznamu, protože vyžaduje očekávaný typ z kontextu
+  if (expected->is_list && actual->is_list && actual->type == TYPE_UNRESOLVED) {
     return true;
   }
 
@@ -725,7 +743,7 @@ static IFJ_ERR push_local_symtables(sem_ctx_t *ctx,
     return IFJ_EINTERNAL;
   }
 
-  for (int i = 0; i < count; i++) {
+  for (int i = count - 1; i >= 0; i--) {
     if (local_symtables[i] == NULL) {
       LOG_ERR(IFJ_EINTERNAL, "Invalid local_symtable at index %d", i);
       return IFJ_EINTERNAL;
@@ -820,13 +838,24 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
           "Concatenation operator requires both operands to be lists.");
     }
 
-    if (lhs_type->type != rhs_type->type) {
+    if (!types_compatible(lhs_type, rhs_type) &&
+        !types_compatible(rhs_type, lhs_type)) {
       CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Concatenation operator requires both "
                                        "operands to be of the same type.");
     }
+
+    // Výsledkem je seznam s typem prvků levého operandu; pokud je levý
+    // operand prázdný seznam bez určeného typu, použije se typ pravého
+    result_type->type = lhs_type->type;
+    if (lhs_type->type == TYPE_UNRESOLVED) {
+      result_type->type = rhs_type->type;
+    }
+    result_type->is_list = true;
+    return IFJ_SUCCESS;
   }
 
-  if (lhs_type->is_list || rhs_type->is_list) {
+  if (expr_node->as.expr.operator_type != TOK_DOT &&
+      (lhs_type->is_list || rhs_type->is_list)) {
     CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
                       "Only the concatenation operator can be used with lists. "
                       "Other operators require non-list operands.");
@@ -910,15 +939,18 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                           "non-list String type.");
       }
       result_type->type = TYPE_INT;
+      result_type->is_list = false;
     } else if (strcmp(dot_identifier, "toInt") == 0) {
       if (lhs_type->type != TYPE_DOUBLE || lhs_type->is_list) {
         CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
                           "The 'toInt' method can only be called on a "
-                          "non-list String type.");
+                          "non-list Double type.");
       }
       result_type->type = TYPE_INT;
+      result_type->is_list = false;
     } else if (strcmp(dot_identifier, "toString") == 0) {
       result_type->type = TYPE_STRING;
+      result_type->is_list = false;
     } else if (strcmp(dot_identifier, "floor") == 0) {
       if (lhs_type->type != TYPE_DOUBLE || lhs_type->is_list) {
         CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
@@ -926,6 +958,29 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                           "non-list Double type.");
       }
       result_type->type = TYPE_DOUBLE;
+      result_type->is_list = false;
+    } else if (strcmp(dot_identifier, "head") == 0) {
+      if (!lhs_type->is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "The 'head' method can only be called on a List.");
+      }
+      result_type->type = lhs_type->type;
+      result_type->is_list = false;
+    } else if (strcmp(dot_identifier, "tail") == 0) {
+      if (!lhs_type->is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "The 'tail' method can only be called on a List.");
+      }
+      result_type->type = lhs_type->type;
+      result_type->is_list = true;
+    } else if (strcmp(dot_identifier, "toList") == 0) {
+      if (lhs_type->type != TYPE_INT || lhs_type->is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "The 'toList' method can only be called on a "
+                          "non-list Int range.");
+      }
+      result_type->type = TYPE_INT;
+      result_type->is_list = true;
     } else {
       CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF, "Unknown method '%s' for dot operator.",
                         dot_identifier);
@@ -990,10 +1045,18 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   ifj26_type_t types_array[2] = {
       {0}}; // Pole pro uložení typů bloků then a else
 
-  err = check_expr(ctx, if_node->as.if_st.body, types_array);
+  if (if_node->as.if_st.body->type == AST_BLOCK) {
+    err = check_block(ctx, if_node->as.if_st.body, types_array, false);
+  } else {
+    err = check_expr(ctx, if_node->as.if_st.body, types_array);
+  }
   CHECK_ERR_LOG_RET(err, "Failed to check then block in if statement.");
 
-  err = check_expr(ctx, if_node->as.if_st.else_st, types_array + 1);
+  if (if_node->as.if_st.else_st->type == AST_BLOCK) {
+    err = check_block(ctx, if_node->as.if_st.else_st, types_array + 1, false);
+  } else {
+    err = check_expr(ctx, if_node->as.if_st.else_st, types_array + 1);
+  }
   CHECK_ERR_LOG_RET(err, "Failed to check else block in if statement.");
 
   if (!types_compatible(&types_array[0], &types_array[1])) {
@@ -1005,6 +1068,131 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   }
 
   *result_type = types_array[0];
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Zkontroluje členskou metodu seznamu s parametry volanou přes tečku.
+ *
+ * @param ctx Kontext sémantické analýzy.
+ * @param expr_node Uzel AST_EXPR (TOK_DOT), jehož pravá strana je
+ * AST_FUNC_CALL.
+ * @param result_type Odvozený typ výsledku volání metody.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR check_list_method_call(sem_ctx_t *ctx, ast_node_t *expr_node,
+                                      ifj26_type_t *result_type) {
+  CHECK_ARGS_NULL_RET(ctx, expr_node, result_type);
+
+  ast_node_t *method_call = expr_node->as.expr.binary.rhs;
+  ast_node_t *receiver = expr_node->as.expr.binary.lhs;
+  const char *method_id = method_call->as.func_call.id;
+
+  if (method_id == NULL) {
+    CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Null identifier in List method call.");
+  }
+
+  // Kontrola typu příjemce metody (levá strana operátoru tečky)
+  ifj26_type_t receiver_type = {0};
+  CHECK_ERR_LOG_RET(check_expr(ctx, receiver, &receiver_type),
+                    "Failed to check receiver of method '%s'.", method_id);
+
+  // Klíčové slovo List na levé straně tečky (pouze pro statické List.range)
+  bool receiver_is_list_keyword = receiver->type == AST_VAR &&
+                                  receiver->as.var.id != NULL &&
+                                  strcmp(receiver->as.var.id, "List") == 0;
+
+  if (method_call->as.func_call.param_lists_cnt != 1) {
+    CHECK_ERR_LOG_RET(
+        IFJ_ESEM_ARGS,
+        "Method '%s' called with incorrect number of paramlists. Expected 1, "
+        "got %ld.",
+        method_id, method_call->as.func_call.param_lists_cnt);
+  }
+
+  ast_node_t *param_list = method_call->as.func_call.param_lists[0];
+  size_t params_cnt = param_list->as.param_list.params_cnt;
+
+  if (strcmp(method_id, "range") == 0) {
+    // Statická funkce List.range(start, end[, step])
+    if (!receiver_is_list_keyword) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                        "The 'range' method can only be called on the List "
+                        "constructor.");
+    }
+
+    if (params_cnt != 2 && params_cnt != 3) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_ARGS,
+                        "The 'range' method expects 2 or 3 parameters, got "
+                        "%ld.",
+                        params_cnt);
+    }
+
+    *result_type = (ifj26_type_t){.type = TYPE_INT, .is_list = true};
+  } else {
+    // Členské metody seznamu drop(n), take(n), slice(from, until)
+    bool is_drop_take =
+        strcmp(method_id, "drop") == 0 || strcmp(method_id, "take") == 0;
+    bool is_slice = strcmp(method_id, "slice") == 0;
+
+    if (!is_drop_take && !is_slice) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF,
+                        "Unknown method '%s' called with parameters via dot "
+                        "operator.",
+                        method_id);
+    }
+
+    if (receiver_is_list_keyword) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                        "The '%s' method cannot be called on the List "
+                        "constructor.",
+                        method_id);
+    }
+
+    if (!receiver_type.is_list) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                        "The '%s' method can only be called on a List.",
+                        method_id);
+    }
+
+    if (is_slice) {
+      if (params_cnt != 2) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_ARGS,
+                          "The 'slice' method expects 2 parameters, got %ld.",
+                          params_cnt);
+      }
+    } else if (params_cnt != 1) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_ARGS,
+                        "The '%s' method expects 1 parameter, got %ld.",
+                        method_id, params_cnt);
+    }
+
+    *result_type = (ifj26_type_t){.type = receiver_type.type, .is_list = true};
+  }
+
+  // Všechny parametry metod seznamu musí být typu Int
+  for (size_t j = 0; j < params_cnt; j++) {
+    ifj26_type_t param_type = {0};
+
+    if (param_list->as.param_list.params[j] == NULL) {
+      CHECK_ERR_LOG_RET(IFJ_EINTERNAL,
+                        "Null parameter node in method '%s' paramlist.",
+                        method_id);
+    }
+
+    CHECK_ERR_LOG_RET(
+        check_expr(ctx, param_list->as.param_list.params[j], &param_type),
+        "Failed to check parameter %ld of method '%s'.", j, method_id);
+
+    if (param_type.type != TYPE_INT || param_type.is_list) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                        "Parameter %ld of method '%s' must be of type Int, got "
+                        "'%s'.",
+                        j, method_id, ifj26_type2str(&param_type));
+    }
+  }
+
+  method_call->inferred_type = *result_type;
   return IFJ_SUCCESS;
 }
 
@@ -1030,29 +1218,180 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
           "Failed to check unary expression operand.");
 
     } else {
-      ifj26_type_t lhs_type = {0};
-      ifj26_type_t rhs_type = {0};
+      // Vynulování výsledného typu, aby se nepřebíral příznak is_list z
+      // předchozího použití (symtable_data_t data se v check_block recyklují
+      // mezi příkazy)
+      *result_type = (ifj26_type_t){0};
 
-      CHECK_ERR_LOG_RET(
-          check_expr(ctx, expr_node->as.expr.binary.lhs, &lhs_type),
-          "Failed to check binary expression left-hand side.");
-      CHECK_ERR_LOG_RET(
-          check_expr(ctx, expr_node->as.expr.binary.rhs, &rhs_type),
-          "Failed to check binary expression right-hand side.");
+      if (expr_node->as.expr.operator_type == TOK_DOT &&
+          expr_node->as.expr.binary.rhs->type == AST_FUNC_CALL) {
+        // Členská metoda s parametry volaná přes tečku
+        // (l.drop(n), l.take(n), l.slice(from, until), List.range(...))
+        CHECK_ERR_LOG_RET(check_list_method_call(ctx, expr_node, result_type),
+                          "Failed to check List method call.");
+      } else {
+        ifj26_type_t lhs_type = {0};
+        ifj26_type_t rhs_type = {0};
 
-      CHECK_ERR_LOG_RET(check_binary_operation_types(
-                            expr_node, &lhs_type, &rhs_type, result_type,
-                            expr_node->as.expr.operator_type == TOK_DOT
-                                ? expr_node->as.expr.binary.rhs->as.var.id
-                                : NULL),
-                        "Failed to check binary operation types.");
+        CHECK_ERR_LOG_RET(
+            check_expr(ctx, expr_node->as.expr.binary.lhs, &lhs_type),
+            "Failed to check binary expression left-hand side.");
+        CHECK_ERR_LOG_RET(
+            check_expr(ctx, expr_node->as.expr.binary.rhs, &rhs_type),
+            "Failed to check binary expression right-hand side.");
+
+        CHECK_ERR_LOG_RET(check_binary_operation_types(
+                              expr_node, &lhs_type, &rhs_type, result_type,
+                              expr_node->as.expr.operator_type == TOK_DOT
+                                  ? expr_node->as.expr.binary.rhs->as.var.id
+                                  : NULL),
+                          "Failed to check binary operation types.");
+      }
     }
   } else if (expr_node->type == AST_FUNC_CALL) {
     symtable_data_t *func_data = NULL;
-    CHECK_ERR_LOG_RET(symtable_find(ctx->global_symtable,
-                                    expr_node->as.func_call.id, &func_data),
-                      "Failed to find function '%s' in global symbol table.",
-                      expr_node->as.func_call.id);
+
+    if (strcmp(expr_node->as.func_call.id, "List") == 0) {
+      // Konstruktor seznamu List(v1, v2, ...)
+      if (expr_node->as.func_call.param_lists_cnt != 1) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_ARGS,
+                          "List constructor called with incorrect number of "
+                          "paramlists. Expected 1, got %ld.",
+                          expr_node->as.func_call.param_lists_cnt);
+      }
+
+      ast_node_t *param_list = expr_node->as.func_call.param_lists[0];
+      size_t params_cnt = param_list->as.param_list.params_cnt;
+
+      // Prázdný seznam nemá určen typ prvků a vyžaduje očekávaný typ z
+      // kontextu (např. val empty: List[Int] = List())
+      if (params_cnt == 0) {
+        *result_type = (ifj26_type_t){.type = TYPE_UNRESOLVED, .is_list = true};
+        expr_node->inferred_type = *result_type;
+        return IFJ_SUCCESS;
+      }
+
+      // Typy prvků se určují jedním průchodem; opakovaná kontrola výrazu by
+      // selhala kvůli přejmenování identifikátorů na code_gen_name
+      ifj26_type_t elem_type = {0};
+      for (size_t i = 0; i < params_cnt; i++) {
+        ifj26_type_t param_type = {0};
+
+        if (param_list->as.param_list.params[i] == NULL) {
+          CHECK_ERR_LOG_RET(
+              IFJ_EINTERNAL,
+              "Null parameter node in List constructor paramlist.");
+        }
+
+        CHECK_ERR_LOG_RET(
+            check_expr(ctx, param_list->as.param_list.params[i], &param_type),
+            "Failed to check parameter %ld in List constructor paramlist.", i);
+
+        if (param_type.is_list && param_type.type == TYPE_UNRESOLVED) {
+          CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                            "Empty list at parameter %ld in List constructor "
+                            "paramlist requires an expected type.",
+                            i);
+        }
+
+        if (i == 0) {
+          elem_type = param_type;
+          continue;
+        }
+
+        // Všechny prvky musí mít kompatibilní typ
+        if (!types_compatible(&elem_type, &param_type) &&
+            !types_compatible(&param_type, &elem_type)) {
+          CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                            "Type mismatch in List constructor paramlist. "
+                            "Parameter 0 has type '%s', but parameter %ld has "
+                            "type '%s'.",
+                            ifj26_type2str(&elem_type), i,
+                            ifj26_type2str(&param_type));
+        }
+
+        // Sjednocení typů Int a Double na Double
+        if (elem_type.type == TYPE_INT && param_type.type == TYPE_DOUBLE) {
+          elem_type.type = TYPE_DOUBLE;
+        }
+      }
+
+      *result_type = (ifj26_type_t){.type = elem_type.type, .is_list = true};
+      expr_node->inferred_type = *result_type;
+      return IFJ_SUCCESS;
+    }
+
+    IFJ_ERR find_err = symtable_find(ctx->global_symtable,
+                                     expr_node->as.func_call.id, &func_data);
+
+    if (find_err == IFJ_ESEM_UNDEF) {
+      // Není to funkce - zkusíme indexaci seznamu lst(index)
+      symtable_data_t var_data = {0};
+      IFJ_ERR var_err =
+          search_variable_in_stack(ctx, expr_node->as.func_call.id, &var_data);
+
+      if (var_err != IFJ_ESEM_UNDEF && CHECK_ERR(var_err)) {
+        LOG_ERR(var_err, "Failed to search variable '%s' in local scopes.",
+                expr_node->as.func_call.id);
+        return var_err;
+      }
+
+      if (var_err == IFJ_SUCCESS) {
+        // Indexace seznamu lst(index): výsledkem je typ prvku seznamu
+        if (!var_data.var.type.is_list) {
+          CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                            "Variable '%s' is not a List and cannot be "
+                            "indexed.",
+                            expr_node->as.func_call.id);
+        }
+
+        if (expr_node->as.func_call.param_lists_cnt != 1 ||
+            expr_node->as.func_call.param_lists[0]->as.param_list.params_cnt !=
+                1) {
+          CHECK_ERR_LOG_RET(
+              IFJ_ESEM_ARGS,
+              "List indexing of '%s' requires exactly one index parameter.",
+              expr_node->as.func_call.id);
+        }
+
+        ifj26_type_t index_type = {0};
+        CHECK_ERR_LOG_RET(
+            check_expr(
+                ctx,
+                expr_node->as.func_call.param_lists[0]->as.param_list.params[0],
+                &index_type),
+            "Failed to check index expression for List '%s'.",
+            expr_node->as.func_call.id);
+
+        if (index_type.type != TYPE_INT || index_type.is_list) {
+          CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                            "List index for '%s' must be of type Int, got "
+                            "'%s'.",
+                            expr_node->as.func_call.id,
+                            ifj26_type2str(&index_type));
+        }
+
+        *result_type =
+            (ifj26_type_t){.type = var_data.var.type.type, .is_list = false};
+        free(expr_node->as.func_call.id);
+        expr_node->as.func_call.id = strdup(var_data.var.code_gen_name);
+        CHECK_MEM_ERR(expr_node->as.func_call.id);
+        expr_node->inferred_type = *result_type;
+        return IFJ_SUCCESS;
+      }
+
+      // Ani funkce, ani proměnná s tímto názvem neexistuje
+      LOG_ERR(IFJ_ESEM_UNDEF,
+              "Function or variable '%s' not found in symbol tables.",
+              expr_node->as.func_call.id);
+      return IFJ_ESEM_UNDEF;
+    }
+
+    if (CHECK_ERR(find_err)) {
+      LOG_ERR(find_err, "Failed to find function '%s' in global symbol table.",
+              expr_node->as.func_call.id);
+      return find_err;
+    }
 
     // Kontrola počtu seznamů parametrů při volání funkce
     if (expr_node->as.func_call.param_lists_cnt !=
@@ -1090,11 +1429,12 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
                             "'%s'.",
                             i, expr_node->as.func_call.id);
         }
-        CHECK_ERR_LOG_RET(
-            check_expr(ctx, param_list_node->as.param_list.params[j],
-                       &actual_param_type),
-            "Failed to check parameter %ld in paramlist %ld for function '%s'.",
-            j, i, expr_node->as.func_call.id);
+        CHECK_ERR_LOG_RET(check_expr(ctx,
+                                     param_list_node->as.param_list.params[j],
+                                     &actual_param_type),
+                          "Failed to check parameter %ld in paramlist %ld "
+                          "for function '%s'.",
+                          j, i, expr_node->as.func_call.id);
 
         if (!types_compatible(&expected_param_list->types[j],
                               &actual_param_type)) {
@@ -1132,6 +1472,16 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
       *result_type = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
     } else if (strcmp(expr_node->as.var.id, "floor") == 0) {
       *result_type = (ifj26_type_t){.type = TYPE_DOUBLE, .is_list = false};
+    } else if (strcmp(expr_node->as.var.id, "List") == 0) {
+      // Klíčové slovo List mimo volání konstruktoru (např. List.range)
+      *result_type = (ifj26_type_t){.type = TYPE_ANY, .is_list = true};
+    } else if (strcmp(expr_node->as.var.id, "head") == 0) {
+      // Členy bez parametrů volané přes tečku - skutečný typ se určí v
+      // check_binary_operation_types podle typu příjemce
+      *result_type = (ifj26_type_t){.type = TYPE_ANY, .is_list = false};
+    } else if (strcmp(expr_node->as.var.id, "tail") == 0 ||
+               strcmp(expr_node->as.var.id, "toList") == 0) {
+      *result_type = (ifj26_type_t){.type = TYPE_ANY, .is_list = true};
     } else {
       symtable_data_t var_data = {0};
       CHECK_ERR_LOG_RET(
@@ -1196,6 +1546,7 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
   symtable_t *local_symtable = NULL;
   symtable_data_t data = {0};
   IFJ_ERR err = IFJ_SUCCESS;
+  bool loop_scope_pushed = false;
 
   if (is_function_body) {
     // Tělo funkce sdílí tabulku symbolů s parametry funkce. Přímá definice
@@ -1277,6 +1628,32 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
             "%d",
             i, stmt->as.def.rhs->type);
         goto cleanup;
+      }
+
+      // Seznamy jsou nemodifikovatelné, lze je ukládat pouze do val
+      if (data.var.type.is_list && stmt->as.def.mut) {
+        err = IFJ_ESEM_TYPE;
+        LOG_ERR(err,
+                "List cannot be stored in a mutable variable '%s' at index "
+                "%ld, use val instead",
+                stmt->as.def.id, i);
+        goto cleanup;
+      }
+
+      // Prázdný seznam vyžaduje explicitně uvedený typ seznamu
+      if (data.var.type.is_list && data.var.type.type == TYPE_UNRESOLVED) {
+        if (!stmt->as.def.type.is_list ||
+            stmt->as.def.type.type == TYPE_UNRESOLVED) {
+          err = IFJ_ESEM_TYPE;
+          LOG_ERR(err,
+                  "Empty list requires an explicit type annotation for "
+                  "variable '%s' at index %ld, e.g. val %s: List[Int] = List()",
+                  stmt->as.def.id, i, stmt->as.def.id);
+          goto cleanup;
+        }
+
+        // Typ prvků se převezme z explicitní anotace
+        data.var.type = stmt->as.def.type;
       }
 
       if (data.var.type.type == TYPE_UNRESOLVED) {
@@ -1467,6 +1844,173 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
                          "Failed to check while loop body at index %ld", i);
       *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
     } else if (stmt->type == AST_FOR) {
+      ast_node_t *for_gen = stmt->as.for_st.gen, *for_range = NULL;
+      symtable_data_t index_var_data = {0};
+      char *index_var_name = NULL;
+      symtable_t *loop_symtable = NULL;
+
+      if (for_gen == NULL) {
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Null generator in for loop at index %ld", i);
+      }
+
+      for_range = for_gen->as.for_gen.range;
+
+      loop_symtable = malloc(sizeof *loop_symtable);
+      CHECK_MEM_ERR_GOTO(loop_symtable, cleanup);
+      err = symtable_init(loop_symtable);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to initialize for-loop scope at index %ld", i);
+      err = stack_push(&ctx->local_scopes, loop_symtable);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to push for-loop scope at index %ld", i);
+      ctx->current_scope_level++;
+      loop_scope_pushed = true;
+
+      err = check_expr(ctx, stmt->as.for_st.gen->as.for_gen.expr, result_type);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to check for loop generator expression at "
+                         "index %ld",
+                         i);
+
+      // Typ řídicí proměnné cyklu
+      ifj26_type_t index_type = {0};
+
+      if (result_type->is_list) {
+        // Seznam jako zdroj generátoru cyklu for
+        if (for_range != NULL) {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+                             "For loop generator over a List cannot have a "
+                             "range at index %ld",
+                             i);
+        }
+
+        if (result_type->type == TYPE_UNRESOLVED) {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+                             "Empty list cannot be used as for loop generator "
+                             "source at index %ld",
+                             i);
+        }
+
+        // Řídící proměnná má typ prvků seznamu
+        index_type =
+            (ifj26_type_t){.type = result_type->type, .is_list = false};
+      } else {
+        if (for_range == NULL) {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+                             "For loop generator without range must iterate "
+                             "over a List at index %ld",
+                             i);
+        }
+
+        if (result_type->type != TYPE_INT) {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+                             "For loop generator expression must be of type "
+                             "Int at index %ld",
+                             i);
+        }
+
+        index_type = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
+      }
+
+      index_var_data.is_function = false;
+      index_var_data.var.is_mutable = false;
+      index_var_data.var.type = index_type;
+      index_var_data.var.code_gen_name =
+          gen_code_gen_name(ctx, stmt->as.for_st.gen->as.for_gen.id);
+      if (index_var_data.var.code_gen_name == NULL) {
+        CHECK_ERR_LOG_GOTO(IFJ_EINTERNAL, cleanup,
+                           "Failed to generate code generation name for index "
+                           "variable '%s' in for loop at index %ld",
+                           stmt->as.for_st.gen->as.for_gen.id, i);
+      }
+      index_var_name = stmt->as.for_st.gen->as.for_gen.id;
+
+      err = symtable_insert(loop_symtable, index_var_name, &index_var_data);
+      if (CHECK_ERR(err)) {
+        free(index_var_data.var.code_gen_name);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to insert index variable '%s' into local "
+                           "symbol table at index %ld",
+                           index_var_name, i);
+      }
+      free(stmt->as.for_st.gen->as.for_gen.id);
+      stmt->as.for_st.gen->as.for_gen.id =
+          strdup(index_var_data.var.code_gen_name);
+      if (stmt->as.for_st.gen->as.for_gen.id == NULL) {
+        free(index_var_data.var.code_gen_name);
+        index_var_data.var.code_gen_name = NULL;
+        CHECK_ERR_LOG_GOTO(IFJ_EINTERNAL, cleanup,
+                           "Failed to copy code-generation name for index "
+                           "variable at index %ld",
+                           i);
+      }
+      free(index_var_data.var.code_gen_name);
+      index_var_data.var.code_gen_name = NULL;
+
+      if (for_range != NULL) {
+        err = check_expr(ctx, for_range->as.for_range.expr, result_type);
+        CHECK_ERR_LOG_GOTO(
+            err, cleanup,
+            "Failed to check for loop range expression at index %ld", i);
+        if (result_type->type != TYPE_INT) {
+          err = IFJ_ESEM_TYPE;
+          CHECK_ERR_LOG_GOTO(err, cleanup,
+                             "For loop range expression must be of type Int at "
+                             "index %ld",
+                             i);
+        }
+
+        if (for_range->as.for_range.by_expr != NULL) {
+          err = check_expr(ctx, for_range->as.for_range.by_expr, result_type);
+          CHECK_ERR_LOG_GOTO(
+              err, cleanup,
+              "Failed to check for loop range by expression at index %ld", i);
+          if (result_type->type != TYPE_INT) {
+            err = IFJ_ESEM_TYPE;
+            CHECK_ERR_LOG_GOTO(
+                err, cleanup,
+                "For loop range by expression must be of type Int at "
+                "index %ld",
+                i);
+          }
+          if (for_range->as.for_range.by_expr->type == AST_LITERAL &&
+              for_range->as.for_range.by_expr->as.literal.type == TYPE_INT &&
+              for_range->as.for_range.by_expr->as.literal.int_value == 0) {
+            err = IFJ_ESEM_OTHER;
+            CHECK_ERR_LOG_GOTO(
+                err, cleanup, "For loop step must not be zero at index %ld", i);
+          }
+        }
+      }
+      for (size_t j = 0; j < stmt->as.for_st.guards_cnt; j++) {
+        ast_node_t *guard = stmt->as.for_st.guards[j];
+        if (guard == NULL) {
+          err = IFJ_EINTERNAL;
+          CHECK_ERR_LOG_GOTO(
+              err, cleanup,
+              "Null guard in for loop at index %ld, guard index %ld", i, j);
+        }
+
+        err = check_if_expr_is_bool(ctx, guard->as.for_guard.expr);
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to check guard expression in for loop at "
+                           "index %ld, guard index %ld",
+                           i, j);
+      }
+
+      err = check_block(ctx, stmt->as.for_st.body, result_type, false);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to check for loop body at index %ld", i);
+
+      pop_local_symtable(ctx);
+      loop_scope_pushed = false;
+      *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false};
     } else if (stmt->type == AST_FUNC_CALL) {
       err = check_expr(ctx, stmt, result_type);
       CHECK_ERR_LOG_GOTO(err, cleanup,
@@ -1493,6 +2037,9 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
   }
 
 cleanup:
+  if (loop_scope_pushed) {
+    pop_local_symtable(ctx);
+  }
   if (is_function_body) {
     // Tabulka symbolů pro parametry a tělo funkce patří volající funkci
     // check_function, proto ji zde nesmíme uvolňovat.
