@@ -6,6 +6,10 @@
  *
  * prompt: "create function that print AST based on ast.h and symtable.h"
  * Gemini Argon: 4.0
+ *
+ * Nahrazení pomocné funkce print_ifj_type() veřejnou funkcí ifj26_type2str()
+ * ze souboru symtable.h bylo provedeno za pomoci modelu GLM-5.3 (via
+ * opencode).
  */
 
 #include <inttypes.h>
@@ -13,48 +17,6 @@
 #include <stdio.h>
 
 #include "ast.h"
-
-/**
- * @brief Pomocná funkce pro výpis datového typu (ifj26_type_t) ze symtable.h
- */
-static void print_ifj_type(const ifj26_type_t *t) {
-  if (t == NULL) {
-    printf("inferred/none");
-    return;
-  }
-  if (t->is_list) {
-    printf("List[");
-  }
-  switch (t->type) {
-  case TYPE_INT:
-    printf("Int");
-    break;
-  case TYPE_DOUBLE:
-    printf("Double");
-    break;
-  case TYPE_STRING:
-    printf("String");
-    break;
-  case TYPE_BOOL:
-    printf("Boolean");
-    break;
-  case TYPE_UNIT:
-    printf("Unit");
-    break;
-  case TYPE_ANY:
-    printf("Any");
-    break;
-  case TYPE_UNRESOLVED:
-    printf("Unresolved");
-    break;
-  default:
-    printf("?Type?");
-    break;
-  }
-  if (t->is_list) {
-    printf("]");
-  }
-}
 
 /**
  * @brief Pomocná funkce pro převod operátoru na text (uprav případně názvy
@@ -133,7 +95,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
     printf("\033[1;34m[FUNC]\033[0m %s\"%s\" -> ",
            node->as.func.main ? "@main " : "",
            node->as.func.id ? node->as.func.id : "NULL");
-    print_ifj_type(&node->as.func.return_type);
+    printf("%s", ifj26_type2str(&node->as.func.return_type));
     printf("\n");
     for (size_t i = 0; i < node->as.func.param_lists_cnt; i++) {
       ast_print_node(node->as.func.param_lists[i], next_prefix, false,
@@ -154,7 +116,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
   case AST_PARAM:
     printf("\033[0;36m[PARAM]\033[0m \"%s\" : ",
            node->as.param.id ? node->as.param.id : "NULL");
-    print_ifj_type(&node->as.param.param_type);
+    printf("%s", ifj26_type2str(&node->as.param.param_type));
     printf("\n");
     break;
 
@@ -171,7 +133,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
     printf(
         "\033[1;32m[DEF]\033[0m %s \"%s\" : ", node->as.def.mut ? "var" : "val",
         node->as.def.id ? node->as.def.id : "NULL");
-    print_ifj_type(&node->as.def.type);
+    printf("%s", ifj26_type2str(&node->as.def.type));
     printf("\n");
     ast_print_node(node->as.def.rhs, next_prefix, true, "rhs");
     break;

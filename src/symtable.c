@@ -3,6 +3,9 @@
  * @brief IFJ26 - Implementace tabulky symbolů a AVL stromu
  *
  * @author xhanzlp00 Petr Hanzlík
+ *
+ * Funkce ifj26_type2str() byla přesunuta ze souboru semantic_analy.c za
+ * pomoci modelu GLM-5.3 (via opencode).
  */
 
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
@@ -20,6 +23,38 @@ struct avl_node {
   struct avl_node *right; /**< Pravý potomek uzlu */
   struct avl_node *left;  /**< Levý potomek uzlu */
 };
+
+/**
+ * @brief Převede typ na řetězec pro účely logování.
+ * @param type Ukazatel na typ.
+ * @return Řetězcová reprezentace typu (např. "List<Int>") nebo "NULL", pokud
+ *         je @p type NULL. Vrácený řetězec je statický literál, není tedy
+ *         nutné jej uvolňovat.
+ */
+const char *ifj26_type2str(const ifj26_type_t *type) {
+  if (type == NULL) {
+    return "NULL";
+  }
+
+  switch (type->type) {
+  case TYPE_UNRESOLVED:
+    return type->is_list ? "List<Unresolved>" : "Unresolved";
+  case TYPE_UNIT:
+    return type->is_list ? "List<Unit>" : "Unit";
+  case TYPE_INT:
+    return type->is_list ? "List<Int>" : "Int";
+  case TYPE_DOUBLE:
+    return type->is_list ? "List<Double>" : "Double";
+  case TYPE_STRING:
+    return type->is_list ? "List<String>" : "String";
+  case TYPE_BOOL:
+    return type->is_list ? "List<Bool>" : "Bool";
+  case TYPE_ANY:
+    return type->is_list ? "List<Any>" : "Any";
+  default:
+    return type->is_list ? "List<Unknown>" : "Unknown";
+  }
+}
 
 IFJ_ERR symtable_init(symtable_t *table) {
   // Kontrola proti NULL pointeru

@@ -3,6 +3,9 @@
  * @brief IFJ26 - Definice funkcí pro práci s tabulkou symbolů
  *
  * @author xhanzlp00 Petr Hanzlík
+ *
+ * Funkce ifj26_type2str() byla přesunuta ze souboru semantic_analy.c za
+ * pomoci modelu GLM-5.3 (via opencode).
  */
 
 #ifndef SYMTABLE_H
@@ -162,5 +165,14 @@ IFJ_ERR symtable_destroy(symtable_t *table);
  */
 IFJ_ERR symtable_traverse(const symtable_t *table, symtable_callback_t callback,
                           void *user_data);
+
+/**
+ * @brief Převede typ na řetězec pro účely logování.
+ * @param type Ukazatel na typ.
+ * @return Řetězcová reprezentace typu (např. "List<Int>") nebo "NULL", pokud
+ *         je @p type NULL. Vrácený řetězec je statický literál, není tedy
+ *         nutné jej uvolňovat.
+ */
+const char *ifj26_type2str(const ifj26_type_t *type);
 
 #endif // SYMTABLE_H
