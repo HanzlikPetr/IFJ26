@@ -798,7 +798,8 @@ static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
 static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                                             ifj26_type_t *lhs_type,
                                             ifj26_type_t *rhs_type,
-                                            ifj26_type_t *result_type) {
+                                            ifj26_type_t *result_type,
+                                            char *dot_identifier) {
   CHECK_ARGS_NULL_RET(expr_node, lhs_type, rhs_type, result_type);
 
   if (expr_node->type != AST_EXPR || expr_node->as.expr.is_unary) {
@@ -840,8 +841,7 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
     } else if (lhs_type->type == rhs_type->type) {
       result_type->type = lhs_type->type;
     } else {
-      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
-                        "Invalid types for addition: %s and %s.",
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Invalid types for addition: %s and %s.",
                         ifj26_type2str(lhs_type), ifj26_type2str(rhs_type));
     }
     break;
@@ -855,9 +855,10 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
     } else if (lhs_type->type == TYPE_INT && rhs_type->type == TYPE_INT) {
       result_type->type = TYPE_INT;
     } else {
-      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
-                        "Invalid types for multiplication/division/subtraction: %s and %s.",
-                        ifj26_type2str(lhs_type), ifj26_type2str(rhs_type));
+      CHECK_ERR_LOG_RET(
+          IFJ_ESEM_TYPE,
+          "Invalid types for multiplication/division/subtraction: %s and %s.",
+          ifj26_type2str(lhs_type), ifj26_type2str(rhs_type));
     }
     break;
   case TOK_TO:
@@ -894,6 +895,40 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
       CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
                         "Invalid types for logical operation: %s and %s.",
                         ifj26_type2str(lhs_type), ifj26_type2str(rhs_type));
+    }
+    break;
+  case TOK_DOT:
+    if (dot_identifier == NULL) {
+      CHECK_ERR_LOG_RET(IFJ_EINTERNAL,
+                        "Dot operator requires a valid identifier.");
+    }
+
+    if (strcmp(dot_identifier, "length") == 0) {
+      if (lhs_type->type != TYPE_STRING || lhs_type->is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "The 'length' method can only be called on a "
+                          "non-list String type.");
+      }
+      result_type->type = TYPE_INT;
+    } else if (strcmp(dot_identifier, "toInt") == 0) {
+      if (lhs_type->type != TYPE_DOUBLE || lhs_type->is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "The 'toInt' method can only be called on a "
+                          "non-list String type.");
+      }
+      result_type->type = TYPE_INT;
+    } else if (strcmp(dot_identifier, "toString") == 0) {
+      result_type->type = TYPE_STRING;
+    } else if (strcmp(dot_identifier, "floor") == 0) {
+      if (lhs_type->type != TYPE_DOUBLE || lhs_type->is_list) {
+        CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE,
+                          "The 'floor' method can only be called on a "
+                          "non-list Double type.");
+      }
+      result_type->type = TYPE_DOUBLE;
+    } else {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF, "Unknown method '%s' for dot operator.",
+                        dot_identifier);
     }
     break;
   default:
@@ -1005,8 +1040,11 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
           check_expr(ctx, expr_node->as.expr.binary.rhs, &rhs_type),
           "Failed to check binary expression right-hand side.");
 
-      CHECK_ERR_LOG_RET(check_binary_operation_types(expr_node, &lhs_type,
-                                                     &rhs_type, result_type),
+      CHECK_ERR_LOG_RET(check_binary_operation_types(
+                            expr_node, &lhs_type, &rhs_type, result_type,
+                            expr_node->as.expr.operator_type == TOK_DOT
+                                ? expr_node->as.expr.binary.rhs->as.var.id
+                                : NULL),
                         "Failed to check binary operation types.");
     }
   } else if (expr_node->type == AST_FUNC_CALL) {
@@ -1069,7 +1107,6 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
               ifj26_type2str(&actual_param_type));
         }
       }
-
     }
 
     if (func_data->func.return_type.type == TYPE_UNRESOLVED) {
@@ -1083,26 +1120,38 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
     CHECK_ERR_LOG_RET(check_if_expr(ctx, expr_node, result_type),
                       "Failed to check if expression.");
   } else if (expr_node->type == AST_VAR) {
-    symtable_data_t var_data = {0};
-    CHECK_ERR_LOG_RET(
-        search_variable_in_stack(ctx, expr_node->as.var.id, &var_data),
-        "Failed to find variable '%s' in local scopes.", expr_node->as.var.id);
+    if (expr_node->as.var.id == NULL) {
+      CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Variable AST node has NULL id.");
+    }
 
-    *result_type = var_data.var.type;
-    free(expr_node->as.var.id);
-    expr_node->as.var.id = strdup(var_data.var.code_gen_name);
-    CHECK_MEM_ERR(expr_node->as.var.id);
-  } else {
-    LOG_ERR(IFJ_EINTERNAL, "Unsupported AST node type: %d", expr_node->type);
-    return IFJ_EINTERNAL;
+    if (strcmp(expr_node->as.var.id, "toString") == 0) {
+      *result_type = (ifj26_type_t){.type = TYPE_STRING, .is_list = false};
+    } else if (strcmp(expr_node->as.var.id, "length") == 0) {
+      *result_type = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
+    } else if (strcmp(expr_node->as.var.id, "toInt") == 0) {
+      *result_type = (ifj26_type_t){.type = TYPE_INT, .is_list = false};
+    } else if (strcmp(expr_node->as.var.id, "floor") == 0) {
+      *result_type = (ifj26_type_t){.type = TYPE_DOUBLE, .is_list = false};
+    } else {
+      symtable_data_t var_data = {0};
+      CHECK_ERR_LOG_RET(
+          search_variable_in_stack(ctx, expr_node->as.var.id, &var_data),
+          "Failed to find variable '%s' in local scopes.",
+          expr_node->as.var.id);
+
+      *result_type = var_data.var.type;
+      free(expr_node->as.var.id);
+      expr_node->as.var.id = strdup(var_data.var.code_gen_name);
+      CHECK_MEM_ERR(expr_node->as.var.id);
+    }
   }
-
   expr_node->inferred_type =
       *result_type; // Uložení odvozeného typu do AST uzlu
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node, ifj26_type_t *result_type) {
+static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node,
+                        ifj26_type_t *result_type) {
   CHECK_ARGS_NULL_RET(ctx, if_node);
   IFJ_ERR err;
 
@@ -1124,14 +1173,19 @@ static IFJ_ERR check_if(sem_ctx_t *ctx, ast_node_t *if_node, ifj26_type_t *resul
 
   // Kontrola typu podmímnky (else if)
   for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
-    err = check_if_expr_is_bool(ctx, if_node->as.if_st.else_if[i]->as.else_if_st.expr);
+    err = check_if_expr_is_bool(
+        ctx, if_node->as.if_st.else_if[i]->as.else_if_st.expr);
     CHECK_ERR_LOG_RET(err, "Failed to check condition expression in else if "
                            "statement or expresion is not type boolean.");
   }
 
-  CHECK_ERR_LOG_RET(check_block(ctx, if_node->as.if_st.body, result_type, false), "Failed to check then block in if statement.");
+  CHECK_ERR_LOG_RET(
+      check_block(ctx, if_node->as.if_st.body, result_type, false),
+      "Failed to check then block in if statement.");
 
-  *result_type = (ifj26_type_t){.type = TYPE_UNIT, .is_list = false}; // If vždy vrací Unit, protože je to příkaz, ne výraz
+  *result_type = (ifj26_type_t){
+      .type = TYPE_UNIT,
+      .is_list = false}; // If vždy vrací Unit, protože je to příkaz, ne výraz
 
   return IFJ_SUCCESS;
 }
@@ -1334,7 +1388,8 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
 
       if (stmt->as.func_ret.rhs == NULL) {
         if (ctx->current_func->return_type.type == TYPE_UNIT) {
-          // samotný return bez výrazu je v pořádku, pokud je návratový typ Unit
+          // samotný return bez výrazu je v pořádku, pokud je návratový typ
+          // Unit
           stmt->inferred_type.type = TYPE_UNIT;
           stmt->inferred_type.is_list = false;
           continue;
@@ -1369,8 +1424,8 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
       }
 
       if (ctx->current_func->return_type.type == TYPE_UNIT) {
-        continue; // return s výrazem je v pořádku, pokud je návratový typ Unit,
-                  // vysledek se ignoruje
+        continue; // return s výrazem je v pořádku, pokud je návratový typ
+                  // Unit, vysledek se ignoruje
       }
 
       if (ctx->current_func->return_type.type == TYPE_UNRESOLVED) {
@@ -1414,19 +1469,16 @@ static IFJ_ERR check_block(sem_ctx_t *ctx, ast_node_t *block_node,
     } else if (stmt->type == AST_FOR) {
     } else if (stmt->type == AST_FUNC_CALL) {
       err = check_expr(ctx, stmt, result_type);
-      CHECK_ERR_LOG_GOTO(
-          err, cleanup,
-          "Failed to check function call at index %ld", i);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to check function call at index %ld", i);
     } else if (stmt->type == AST_EXPR) {
       err = check_expr(ctx, stmt, result_type);
       CHECK_ERR_LOG_GOTO(
-          err, cleanup,
-          "Failed to check expression statement at index %ld", i);
+          err, cleanup, "Failed to check expression statement at index %ld", i);
     } else if (stmt->type == AST_LITERAL) {
       err = check_expr(ctx, stmt, result_type);
-      CHECK_ERR_LOG_GOTO(
-          err, cleanup,
-          "Failed to check literal statement at index %ld", i);
+      CHECK_ERR_LOG_GOTO(err, cleanup,
+                         "Failed to check literal statement at index %ld", i);
     } else {
       err = IFJ_EINTERNAL;
       CHECK_ERR_LOG_GOTO(err, cleanup,
@@ -1514,7 +1566,8 @@ static IFJ_ERR check_function(symtable_t *functions_table,
       "Failed to initialize local scopes stack for function '%s'.",
       func_data->func.node->as.func.id);
 
-  // Vytvoření lokální tabulky symbolů pro funkci (parametry a lokální proměnné)
+  // Vytvoření lokální tabulky symbolů pro funkci (parametry a lokální
+  // proměnné)
   local_symtable = malloc(sizeof(symtable_t));
   CHECK_MEM_ERR(local_symtable);
 
@@ -1539,23 +1592,19 @@ static IFJ_ERR check_function(symtable_t *functions_table,
       param_data.is_function = false;
       param_data.var.type = param_list->types[j];
       param_data.var.is_mutable = false; // Parametry jsou implicitně neměnné
-      const char *param_id =
-          func_data->func.node->as.func.param_lists[i]
-              ->as.param_list.params[j]
-              ->as.param.id;
+      const char *param_id = func_data->func.node->as.func.param_lists[i]
+                                 ->as.param_list.params[j]
+                                 ->as.param.id;
       param_data.var.code_gen_name = gen_code_gen_name(&ctx, param_id);
       if (param_data.var.code_gen_name == NULL) {
         err = IFJ_EINTERNAL;
         goto cleanup;
       }
 
-      err = symtable_insert(local_symtable,
-                            param_id,
-                            &param_data);
+      err = symtable_insert(local_symtable, param_id, &param_data);
       if (err == IFJ_SUCCESS) {
-        ast_node_t *param =
-            func_data->func.node->as.func.param_lists[i]
-                ->as.param_list.params[j];
+        ast_node_t *param = func_data->func.node->as.func.param_lists[i]
+                                ->as.param_list.params[j];
         free(param->as.param.id);
         param->as.param.id = strdup(param_data.var.code_gen_name);
         if (param->as.param.id == NULL) {
@@ -1598,8 +1647,8 @@ static IFJ_ERR check_function(symtable_t *functions_table,
   func_data->func.is_checked = true;
   func_data->func.is_resolving = false;
   func_data->func.node->as.func.return_type =
-      func_data->func.return_type; // Uložení odvozeného návratového typu do AST
-                                   // uzlu funkce
+      func_data->func.return_type; // Uložení odvozeného návratového typu do
+                                   // AST uzlu funkce
 cleanup:
   func_data->func.is_resolving = false;
   stack_deep_dtor(&ctx.local_scopes, destroy_local_symtable_stack);
