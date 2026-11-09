@@ -40,7 +40,7 @@ static void free_param_lists(func_data_t *func) {
     return;
   }
 
-  for (int i = 0; i < func->param_list_count; i++) {
+  for (size_t i = 0; i < func->param_list_count; i++) {
     if (func->param_list[i]) {
       free(func->param_list[i]->types);
       free(func->param_list[i]);
@@ -97,10 +97,10 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
     CHECK_MEM_ERR(dest->func.param_list);
 
     // Kopírování jednotlivých seznamů parametrů
-    for (int i = 0; i < dest->func.param_list_count; i++) {
+    for (size_t i = 0; i < dest->func.param_list_count; i++) {
       // Zdrojový ukazatel na seznam parametrů nesmí být NULL
       if (!src->func.param_list[i]) {
-        LOG_ERR(IFJ_EINTERNAL, "Invalid function data: param_list[%d] is NULL",
+        LOG_ERR(IFJ_EINTERNAL, "Invalid function data: param_list[%ld] is NULL",
                 i);
         free_param_lists(&dest->func);
         return IFJ_EINTERNAL;
@@ -145,7 +145,7 @@ static IFJ_ERR duplicate_data(const symtable_data_t *src,
       } else {
         LOG_ERR(IFJ_EINTERNAL,
                 "Invalid function data: param_list_count > 0 and param_list "
-                "is NULL for parameter list %d",
+                "is NULL for parameter list %ld",
                 i);
         free_param_lists(&dest->func);
         return IFJ_EINTERNAL;
