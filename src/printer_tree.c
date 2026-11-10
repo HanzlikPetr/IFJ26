@@ -10,6 +10,9 @@
  * Nahrazení pomocné funkce print_ifj_type() veřejnou funkcí ifj26_type2str()
  * ze souboru symtable.h bylo provedeno za pomoci modelu GLM-5.3 (via
  * opencode).
+ *
+ * Výpis odvozeného typu uzlu (inferred_type) v funkci print_inferred_type()
+ * byl přidán za pomoci modelu GLM-5.3 (via opencode).
  */
 
 #include <inttypes.h>
@@ -64,6 +67,17 @@ static const char *op_to_str(token_type_t op) {
 }
 
 /**
+ * @brief Vypíše typ odvozený sémantickou analýzou (inferred_type) jako tag
+ *        "@Typ" na začátek řádku uzlu. Nevytiskne nic, dokud typ zůstává
+ *        TYPE_UNRESOLVED, aby výpis po parseru zůstal beze změny.
+ */
+static void print_inferred_type(const ast_node_t *node) {
+  if (node != NULL && node->inferred_type.type != TYPE_UNRESOLVED) {
+    printf("\033[0;35m@%s\033[0m ", ifj26_type2str(&node->inferred_type));
+  }
+}
+
+/**
  * @brief Rekurzivní výpis libovolného uzlu AST
  */
 static void ast_print_node(const ast_node_t *node, const char *prefix,
@@ -72,6 +86,7 @@ static void ast_print_node(const ast_node_t *node, const char *prefix,
   if (role != NULL) {
     printf("\033[0;90m%s:\033[0m ", role);
   }
+  print_inferred_type(node);
 
   if (node == NULL) {
     printf("(NULL)\n");
