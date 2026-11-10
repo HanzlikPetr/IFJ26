@@ -13,6 +13,13 @@
  * List members called with dot (head, tail, toList, drop, take, slice,
  * List.range), list indexing lst(i) and list concatenation ++, and fix the
  * related List constructor type-inference bugs."
+ *
+ * Detekce rekurzivních cyklů (povinný explicitní návratový typ u každé
+ * funkce v cyklu) byla vygenerována za pomoci modelu GLM-5.3 (via opencode)
+ * na základě promptu:
+ * "Detect self and mutual recursion in check_functions() before body
+ * checking and report IFJ_ESEM_TYPE unless every function in the recursion
+ * cycle has an explicitly specified return type."
  */
 
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
@@ -21,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dstring.h"
 #include "error.h"
 #include "scanner.h"
 #include "semantic_analy.h"
@@ -1716,38 +1724,13 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
         expr_node->as.var.id = strdup(var_data.var.code_gen_name);
         CHECK_MEM_ERR(expr_node->as.var.id);
       } else {
-        // Není to proměnná - jedná se buď o odkaz na funkci bez seznamu
-        // parametrů (PARAMLISTS: volání pouhým uvedením jména), nebo o
-        // nedefinovaný identifikátor
-        symtable_data_t *func_data = NULL;
-        IFJ_ERR find_err = symtable_find(ctx->global_symtable,
-                                         expr_node->as.var.id, &func_data);
-
-        if (CHECK_ERR(find_err) || func_data == NULL ||
-            !func_data->is_function || func_data->func.param_list_count != 0) {
-          // Částečná aplikace není podporována, odkaz bez závorek je povolen
-          // pouze pro funkce bez seznamu parametrů
-          LOG_ERR(IFJ_ESEM_UNDEF,
-                  "Variable or parameterless function '%s' not found in symbol "
-                  "tables.",
-                  expr_node->as.var.id);
-          return IFJ_ESEM_UNDEF;
-        }
-
-        if (func_data->func.return_type.type == TYPE_UNRESOLVED) {
-          CHECK_ERR_LOG_RET(check_function(ctx->global_symtable, func_data),
-                            "Failed to check function '%s'.",
-                            expr_node->as.var.id);
-        }
-
-        *result_type = func_data->func.return_type;
-
-        // Převod na volání funkce pro generování kódu (id je v unionu na
-        // stejném místě pro var i func_call, proto se přenáší bez kopírování)
-        expr_node->type = AST_FUNC_CALL;
-        expr_node->as.func_call.id = expr_node->as.var.id;
-        expr_node->as.func_call.param_lists = NULL;
-        expr_node->as.func_call.param_lists_cnt = 0;
+        // Není to proměnná - holý identifikátor není platné volání funkce,
+        // funkce se vždy volají se seznamem argumentů (i když je prázdný)
+        LOG_ERR(IFJ_ESEM_UNDEF,
+                "Variable or parameterless function '%s' not found in symbol "
+                "tables.",
+                expr_node->as.var.id);
+        return IFJ_ESEM_UNDEF;
       }
     }
   }
@@ -2540,6 +2523,571 @@ cleanup:
   return err;
 }
 
+/**
+ * @brief Kontext detekce rekurzivních cyklů v grafu volání funkcí.
+ *
+ * Průchod udržuje zásobník právě procházených funkcí (path, "šedé" vrcholy)
+ * a zásobník již dokončených funkcí (visited, "černé" vrcholy). Zanoření do
+ * funkce, která se již nachází na zásobníku path, značí zpětnou hranu, tedy
+ * cyklus.
+ */
+typedef struct {
+  symtable_data_t *
+      *user_funcs; // Pole ukazatelů na uživatelsky definované funkce
+  size_t user_funcs_cnt; // Počet uživatelsky definovaných funkcí
+  stack_t path; // Zásobník právě procházených funkcí (šedé vrcholy)
+  stack_t visited; // Zásobník již dokončených funkcí (černé vrcholy)
+} recursion_ctx_t;
+
+static IFJ_ERR recursion_walk_node(recursion_ctx_t *ctx, const ast_node_t *node,
+                                   bool member_pos);
+
+/**
+ * @brief Pomocná funkce pro přidání řetězce do dynamického řetězce.
+ * @param chain Dynamický řetězec.
+ * @param str Přidávaný řetězec ukončený nulovým bajtem.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru nebo chybě alokace,
+ *         jinak IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_chain_append_str(dstring_t *chain, const char *str) {
+  CHECK_ARGS_NULL_RET(chain, str);
+
+  for (const char *c = str; *c != '\0'; c++) {
+    CHECK_ERR_RET(dstring_append(chain, *c));
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Pomocná funkce pro zjištění, zda se daná funkce nachází v zásobníku.
+ *
+ * Struktura stack_t neumožňuje přímý průchod prvky, proto se prvky dočasně
+ * sejmou do pomocného pole a po prohledání se vrátí zpět v původním pořadí
+ * (stejný postup jako ve funkci search_variable_in_stack).
+ *
+ * @param stack Prohledávaný zásobník.
+ * @param max_depth Maximální hloubka zásobníku (horní mez pro pomocné pole).
+ * @param needle Hledaná funkce.
+ * @param found Výsledek hledání.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru, chybě alokace nebo chybě
+ *         zásobníku, jinak IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_stack_contains(stack_t *stack, size_t max_depth,
+                                        const symtable_data_t *needle,
+                                        bool *found) {
+  CHECK_ARGS_NULL_RET(stack, needle, found);
+
+  IFJ_ERR err = IFJ_SUCCESS;
+  symtable_data_t **popped = NULL;
+  size_t popped_cnt = 0;
+  bool is_empty = true;
+
+  *found = false;
+
+  err = stack_is_empty(stack, &is_empty);
+  CHECK_ERR_RET(err);
+
+  if (is_empty) {
+    return IFJ_SUCCESS;
+  }
+
+  // Zásobník není prázdný, pomocné pole proto musí mít nenulovou kapacitu
+  popped = malloc((max_depth > 0 ? max_depth : 1) * sizeof(*popped));
+  if (popped == NULL) {
+    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed");
+    return IFJ_EINTERNAL;
+  }
+
+  while (!*found && !is_empty) {
+    symtable_data_t *top = NULL;
+
+    err = stack_pop(stack, (void **)&top);
+
+    if (CHECK_ERR(err)) {
+      break;
+    }
+
+    popped[popped_cnt++] = top;
+
+    if (top == needle) {
+      *found = true;
+    }
+
+    err = stack_is_empty(stack, &is_empty);
+
+    if (CHECK_ERR(err)) {
+      break;
+    }
+  }
+
+  // Vrácení sejmutých prvků zpět do zásobníku v původním pořadí
+  while (popped_cnt > 0) {
+    IFJ_ERR push_err = stack_push(stack, popped[--popped_cnt]);
+
+    if (CHECK_ERR(push_err)) {
+      err = push_err;
+      break;
+    }
+  }
+
+  free(popped);
+  return err;
+}
+
+/**
+ * @brief Pomocná funkce pro vložení funkce na zásobník path.
+ * @param ctx Kontext detekce rekurzivních cyklů.
+ * @param func_data Vkládaná funkce.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru, jinak IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_path_push(recursion_ctx_t *ctx,
+                                   symtable_data_t *func_data) {
+  CHECK_ARGS_NULL_RET(ctx, func_data);
+
+  return stack_push(&ctx->path, func_data);
+}
+
+/**
+ * @brief Pomocná funkce pro odstranění funkce ze zásobníku path. Odstraněná
+ *        funkce se označí jako dokončená (přesune se do zásobníku visited).
+ * @param ctx Kontext detekce rekurzivních cyklů.
+ * @return IFJ_EINTERNAL při poslání NULL pointeru, jinak IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_path_pop(recursion_ctx_t *ctx) {
+  CHECK_ARG_NULL_RET(ctx);
+
+  symtable_data_t *finished = NULL;
+  IFJ_ERR err = stack_pop(&ctx->path, (void **)&finished);
+  CHECK_ERR_RET(err);
+
+  return stack_push(&ctx->visited, finished);
+}
+
+/**
+ * @brief Pomocná funkce pro nahlášení rekurzivního cyklu. Cyklus tvořený
+ *        pouze funkcemi s explicitně zadaným návratovým typem je povolen.
+ * @param ctx Kontext detekce rekurzivních cyklů.
+ * @param callee Funkce, na kterou zpětná hrana ukazuje (začátek cyklu).
+ * @return IFJ_ESEM_TYPE pokud cyklus obsahuje funkci bez explicitního
+ *         návratového typu, IFJ_EINTERNAL při chybě alokace, jinak
+ *         IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_report_cycle(recursion_ctx_t *ctx,
+                                      symtable_data_t *callee) {
+  CHECK_ARGS_NULL_RET(ctx, callee);
+
+  IFJ_ERR err = IFJ_SUCCESS;
+  dstring_t chain = {0};
+
+  // Snímek zásobníku path do pomocného pole (sejímání probíhá od vrcholu ke
+  // dnu, proto snapshot[0] je vrchol zásobníku); hloubka zásobníku nemůže
+  // přesáhnout počet uživatelsky definovaných funkcí
+  symtable_data_t **snapshot = malloc(ctx->user_funcs_cnt * sizeof(*snapshot));
+  if (snapshot == NULL) {
+    LOG_ERR(IFJ_EINTERNAL, "Memory allocation failed");
+    return IFJ_EINTERNAL;
+  }
+
+  size_t snapshot_len = 0;
+  bool is_empty = true;
+
+  err = stack_is_empty(&ctx->path, &is_empty);
+  CHECK_ERR_GOTO(err, cleanup);
+
+  while (!is_empty) {
+    symtable_data_t *top = NULL;
+
+    err = stack_pop(&ctx->path, (void **)&top);
+    CHECK_ERR_GOTO(err, cleanup);
+
+    snapshot[snapshot_len++] = top;
+
+    err = stack_is_empty(&ctx->path, &is_empty);
+    CHECK_ERR_GOTO(err, cleanup);
+  }
+
+  // Obnovení zásobníku path do původního pořadí
+  for (size_t i = snapshot_len; i-- > 0 && err == IFJ_SUCCESS;) {
+    err = stack_push(&ctx->path, snapshot[i]);
+  }
+
+  CHECK_ERR_GOTO(err, cleanup);
+
+  // Hledání začátku cyklu ve snímku (cyklus tvoří funkce od callee až po
+  // vrchol zásobníku)
+  size_t cycle_start = 0;
+  for (size_t i = 0; i < snapshot_len; i++) {
+    if (snapshot[i] == callee) {
+      cycle_start = i;
+      break;
+    }
+  }
+
+  // Hledání první funkce v cyklu bez explicitně zadaného návratového typu
+  // (průchod od začátku cyklu směrem k vrcholu zásobníku)
+  symtable_data_t *offender = NULL;
+  for (size_t i = cycle_start + 1; i-- > 0;) {
+    if (!snapshot[i]->func.return_type_explicit) {
+      offender = snapshot[i];
+      break;
+    }
+  }
+
+  // Cyklus tvořený pouze funkcemi s explicitním návratovým typem je povolen
+  if (offender == NULL) {
+    goto cleanup;
+  }
+
+  // Sestavení popisu cyklu ve tvaru 'a' -> 'b' -> 'a'
+  err = dstring_init(&chain);
+  CHECK_ERR_GOTO(err, cleanup);
+
+  for (size_t i = cycle_start + 1; i-- > 0 && err == IFJ_SUCCESS;) {
+    const char *id = snapshot[i]->func.node->as.func.id;
+
+    if (i < cycle_start) {
+      err = recursion_chain_append_str(&chain, " -> ");
+    }
+    if (err == IFJ_SUCCESS) {
+      err = dstring_append(&chain, '\'');
+    }
+    if (err == IFJ_SUCCESS) {
+      err = recursion_chain_append_str(&chain, id);
+    }
+    if (err == IFJ_SUCCESS) {
+      err = dstring_append(&chain, '\'');
+    }
+  }
+
+  if (err == IFJ_SUCCESS) {
+    err = recursion_chain_append_str(&chain, " -> '");
+  }
+  if (err == IFJ_SUCCESS) {
+    err = recursion_chain_append_str(&chain, callee->func.node->as.func.id);
+  }
+  if (err == IFJ_SUCCESS) {
+    err = dstring_append(&chain, '\'');
+  }
+
+  if (err == IFJ_SUCCESS) {
+    LOG_ERR(IFJ_ESEM_TYPE,
+            "Recursion cycle detected in function '%s' without explicit "
+            "return type (cycle: %s). All functions in a recursion cycle must "
+            "have an explicitly specified return type.",
+            offender->func.node->as.func.id, chain.data);
+    err = IFJ_ESEM_TYPE;
+  }
+
+cleanup:
+  dstring_free(&chain);
+  free(snapshot);
+  return err;
+}
+
+/**
+ * @brief Pomocná funkce pro zpracování hrany volání funkce v grafu volání.
+ *        Hrana vede pouze na uživatelsky definované funkce; vestavěné funkce
+ *        a nedefinované identifikátory se přeskakují (ty se řeší v běžné
+ *        kontrole funkcí).
+ * @param ctx Kontext detekce rekurzivních cyklů.
+ * @param callee_id Identifikátor volané funkce.
+ * @return IFJ_ESEM_TYPE při detekci cyklu s funkcí bez explicitního
+ *         návratového typu, IFJ_EINTERNAL při vnitřní chybě, jinak
+ *         IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_check_edge(recursion_ctx_t *ctx,
+                                    const char *callee_id) {
+  CHECK_ARGS_NULL_RET(ctx, callee_id);
+  IFJ_ERR err = IFJ_SUCCESS;
+
+  // Hledání volané funkce mezi uživatelsky definovanými funkcemi; vestavěné
+  // funkce a nedefinované identifikátory se přeskakují (ty se řeší v běžné
+  // kontrole funkcí)
+  symtable_data_t *callee = NULL;
+  for (size_t i = 0; i < ctx->user_funcs_cnt; i++) {
+    if (strcmp(ctx->user_funcs[i]->func.node->as.func.id, callee_id) == 0) {
+      callee = ctx->user_funcs[i];
+      break;
+    }
+  }
+
+  if (callee == NULL) {
+    // Neznámý identifikátor není platné volání
+    return IFJ_SUCCESS;
+  }
+
+  bool on_path = false;
+  err = recursion_stack_contains(&ctx->path, ctx->user_funcs_cnt, callee,
+                                 &on_path);
+  CHECK_ERR_RET(err);
+
+  if (on_path) {
+    // Zpětná hrana - nalezen cyklus
+    return recursion_report_cycle(ctx, callee);
+  }
+
+  bool is_visited = false;
+  err = recursion_stack_contains(&ctx->visited, ctx->user_funcs_cnt, callee,
+                                 &is_visited);
+  CHECK_ERR_RET(err);
+
+  if (is_visited) {
+    return IFJ_SUCCESS;
+  }
+
+  err = recursion_path_push(ctx, callee);
+  CHECK_ERR_RET(err);
+
+  err = recursion_walk_node(ctx, callee->func.node->as.func.body, false);
+  if (CHECK_ERR(err)) {
+    return err;
+  }
+
+  return recursion_path_pop(ctx);
+}
+
+/**
+ * @brief Pomocná funkce pro průchod AST hledající volání uživatelsky
+ *        definovaných funkcí (hrany v grafu volání). Pravý operand výrazu
+ *        s operátorem tečky je přístup ke členu (proměnná nebo metoda), a
+ *        proto se nekonsideruje voláním globální funkce; jeho argumenty a
+ *        vnořené výrazy se ale procházejí dále.
+ * @param ctx Kontext detekce rekurzivních cyklů.
+ * @param node Procházený AST uzel.
+ * @param member_pos true pokud se uzel nachází v pozici členu za tečkou.
+ * @return IFJ_ESEM_TYPE při detekci cyklu s funkcí bez explicitního
+ *         návratového typu, IFJ_EINTERNAL při vnitřní chybě, jinak
+ *         IFJ_SUCCESS.
+ */
+static IFJ_ERR recursion_walk_node(recursion_ctx_t *ctx, const ast_node_t *node,
+                                   bool member_pos) {
+  if (node == NULL) {
+    return IFJ_SUCCESS;
+  }
+
+  IFJ_ERR err = IFJ_SUCCESS;
+
+  switch (node->type) {
+  case AST_LITERAL:
+  case AST_PARAM:
+  case AST_VAR:
+  case AST_ROOT:
+  case AST_FUNC:
+    // Listové uzly a uzly funkcí (tělo se prochází zvlášť); holý
+    // identifikátor není volání funkce, nevede tedy žádná hrana
+    return IFJ_SUCCESS;
+
+  case AST_FUNC_CALL:
+    if (!member_pos) {
+      // Konstruktor List(...) se chová jako vestavěná funkce
+      if (strcmp(node->as.func_call.id, "List") != 0) {
+        err = recursion_check_edge(ctx, node->as.func_call.id);
+        CHECK_ERR_RET(err);
+      }
+    }
+
+    for (size_t i = 0; i < node->as.func_call.param_lists_cnt; i++) {
+      err = recursion_walk_node(ctx, node->as.func_call.param_lists[i], false);
+      CHECK_ERR_RET(err);
+    }
+
+    return IFJ_SUCCESS;
+
+  case AST_PARAM_LIST:
+    for (size_t i = 0; i < node->as.param_list.params_cnt; i++) {
+      err = recursion_walk_node(ctx, node->as.param_list.params[i], false);
+      CHECK_ERR_RET(err);
+    }
+
+    return IFJ_SUCCESS;
+
+  case AST_EXPR:
+    if (node->as.expr.is_unary) {
+      return recursion_walk_node(ctx, node->as.expr.unary.operand, member_pos);
+    }
+
+    err = recursion_walk_node(ctx, node->as.expr.binary.lhs, member_pos);
+    CHECK_ERR_RET(err);
+
+    // Pravý operand tečky je přístup ke členu, ne volání globální funkce
+    return recursion_walk_node(ctx, node->as.expr.binary.rhs,
+                               node->as.expr.operator_type == TOK_DOT);
+
+  case AST_DEF:
+    return recursion_walk_node(ctx, node->as.def.rhs, member_pos);
+
+  case AST_ASSIGN:
+    return recursion_walk_node(ctx, node->as.assign.rhs, member_pos);
+
+  case AST_FUNC_RET:
+    return recursion_walk_node(ctx, node->as.func_ret.rhs, member_pos);
+
+  case AST_BLOCK:
+    for (size_t i = 0; i < node->as.block.commands_cnt; i++) {
+      err = recursion_walk_node(ctx, node->as.block.commands[i], member_pos);
+      CHECK_ERR_RET(err);
+    }
+
+    return IFJ_SUCCESS;
+
+  case AST_IF:
+    err = recursion_walk_node(ctx, node->as.if_st.expr, member_pos);
+    CHECK_ERR_RET(err);
+
+    err = recursion_walk_node(ctx, node->as.if_st.body, member_pos);
+    CHECK_ERR_RET(err);
+
+    for (size_t i = 0; i < node->as.if_st.else_if_cnt; i++) {
+      err = recursion_walk_node(ctx, node->as.if_st.else_if[i], member_pos);
+      CHECK_ERR_RET(err);
+    }
+
+    return recursion_walk_node(ctx, node->as.if_st.else_st, member_pos);
+
+  case AST_ELSE_IF:
+    err = recursion_walk_node(ctx, node->as.else_if_st.expr, member_pos);
+    CHECK_ERR_RET(err);
+
+    return recursion_walk_node(ctx, node->as.else_if_st.body, member_pos);
+
+  case AST_WHILE:
+    err = recursion_walk_node(ctx, node->as.while_st.expr, member_pos);
+    CHECK_ERR_RET(err);
+
+    return recursion_walk_node(ctx, node->as.while_st.body, member_pos);
+
+  case AST_FOR:
+    err = recursion_walk_node(ctx, node->as.for_st.gen, member_pos);
+    CHECK_ERR_RET(err);
+
+    for (size_t i = 0; i < node->as.for_st.guards_cnt; i++) {
+      err = recursion_walk_node(ctx, node->as.for_st.guards[i], member_pos);
+      CHECK_ERR_RET(err);
+    }
+
+    return recursion_walk_node(ctx, node->as.for_st.body, member_pos);
+
+  case AST_FOR_GEN:
+    err = recursion_walk_node(ctx, node->as.for_gen.expr, member_pos);
+    CHECK_ERR_RET(err);
+
+    return recursion_walk_node(ctx, node->as.for_gen.range, member_pos);
+
+  case AST_FOR_RANGE:
+    err = recursion_walk_node(ctx, node->as.for_range.expr, member_pos);
+    CHECK_ERR_RET(err);
+
+    return recursion_walk_node(ctx, node->as.for_range.by_expr, member_pos);
+
+  case AST_FOR_GUARD:
+    return recursion_walk_node(ctx, node->as.for_guard.expr, member_pos);
+
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Unknown AST node type in recursion pre-pass: %d",
+            node->type);
+    return IFJ_EINTERNAL;
+  }
+}
+
+/**
+ * @brief Pomocná funkce pro detekci rekurzivních cyklů v grafu volání
+ *        uživatelsky definovaných funkcí. Graf volání se sestaví průchodem
+ *        těl funkcí a DFS z každé funkce; každý cyklus musí mít všechny
+ *        své funkce s explicitně zadaným návratovým typem.
+ * @param root AST uzel kořene programu (AST_ROOT).
+ * @param functions_table Globální tabulka funkcí.
+ * @return IFJ_ESEM_TYPE při detekci cyklu s funkcí bez explicitního
+ *         návratového typu, IFJ_EINTERNAL při vnitřní chybě, jinak
+ *         IFJ_SUCCESS.
+ */
+static IFJ_ERR detect_recursion_cycles(const ast_node_t *root,
+                                       symtable_t *functions_table) {
+  CHECK_ARGS_NULL_RET(root, functions_table);
+
+  IFJ_ERR err = IFJ_SUCCESS;
+  recursion_ctx_t ctx = {0};
+
+  // Inicializace zásobníků pro DFS (path i visited)
+  err = stack_init(&ctx.path);
+  CHECK_ERR_LOG_RET(err, "Failed to initialize recursion path stack.");
+
+  err = stack_init(&ctx.visited);
+  CHECK_ERR_LOG_RET(err, "Failed to initialize recursion visited stack.");
+
+  // Sestavení pole uživatelsky definovaných funkcí (vestavěné funkce se
+  // v pre-passu neřeší)
+  if (root->as.root.funcs_cnt > 0) {
+    ctx.user_funcs = malloc(root->as.root.funcs_cnt * sizeof(*ctx.user_funcs));
+    CHECK_MEM_ERR(ctx.user_funcs);
+  }
+
+  for (size_t i = 0; i < root->as.root.funcs_cnt && err == IFJ_SUCCESS; i++) {
+    ast_node_t *func_node = root->as.root.funcs[i];
+
+    if (func_node == NULL || func_node->type != AST_FUNC) {
+      LOG_ERR(IFJ_EINTERNAL, "Invalid AST node type for function: %d",
+              func_node ? (int)func_node->type : -1);
+      err = IFJ_EINTERNAL;
+      break;
+    }
+
+    symtable_data_t *func_data = NULL;
+    err = symtable_find(functions_table, func_node->as.func.id, &func_data);
+
+    if (CHECK_ERR(err)) {
+      LOG_ERR(err, "Function '%s' not found in symbol table.",
+              func_node->as.func.id);
+      break;
+    }
+
+    if (func_data != NULL && func_data->is_function &&
+        func_data->func.node != NULL) {
+      ctx.user_funcs[ctx.user_funcs_cnt++] = func_data;
+    }
+  }
+
+  // DFS z každé uživatelsky definované funkce
+  for (size_t i = 0; i < ctx.user_funcs_cnt && err == IFJ_SUCCESS; i++) {
+    symtable_data_t *func_data = ctx.user_funcs[i];
+
+    bool is_visited = false;
+    err = recursion_stack_contains(&ctx.visited, ctx.user_funcs_cnt, func_data,
+                                   &is_visited);
+
+    if (CHECK_ERR(err)) {
+      break;
+    }
+
+    if (is_visited) {
+      continue;
+    }
+
+    err = recursion_path_push(&ctx, func_data);
+
+    if (CHECK_ERR(err)) {
+      break;
+    }
+
+    err = recursion_walk_node(&ctx, func_data->func.node->as.func.body, false);
+
+    if (CHECK_ERR(err)) {
+      break;
+    }
+
+    err = recursion_path_pop(&ctx);
+
+    if (CHECK_ERR(err)) {
+      break;
+    }
+  }
+
+  stack_dtor(&ctx.path);
+  stack_dtor(&ctx.visited);
+  free(ctx.user_funcs);
+  return err;
+}
+
 IFJ_ERR check_functions(const ast_node_t *root, symtable_t *functions_table) {
   CHECK_ARGS_NULL_RET(root, functions_table);
   symtable_data_t *func_data = NULL;
@@ -2548,6 +3096,11 @@ IFJ_ERR check_functions(const ast_node_t *root, symtable_t *functions_table) {
     LOG_ERR(IFJ_EINTERNAL, "Invalid AST root node type: %d", root->type);
     return IFJ_EINTERNAL;
   }
+
+  // Detekce rekurzivních cyklů před kontrolou funkcí: každá funkce v cyklu
+  // musí mít explicitně zadaný návratový typ
+  CHECK_ERR_LOG_RET(detect_recursion_cycles(root, functions_table),
+                    "Failed to detect recursion cycles in call graph.");
 
   for (size_t i = 0; i < root->as.root.funcs_cnt; i++) {
     ast_node_t *func_node = root->as.root.funcs[i];
