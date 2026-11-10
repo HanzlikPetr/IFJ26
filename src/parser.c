@@ -297,9 +297,9 @@ static IFJ_ERR parse_type_id(parser_t *parser, ifj26_type_t *type) {
       !parser_is_keyword(parser, KW_STRING) &&
       !parser_is_keyword(parser, KW_UNIT) &&
       !parser_is_keyword(parser, KW_BOOLEAN)) {
-    LOG_ERR(IFJ_ESYNTAX, "Expected type on line %d",
+    LOG_ERR(IFJ_ESEM_UNDEF, "Expected type on line %d",
             parser->current_token.line);
-    return IFJ_ESYNTAX;
+    return IFJ_ESEM_UNDEF;
   }
 
   switch (parser->current_token.value.keyword) {
@@ -768,6 +768,9 @@ static IFJ_ERR parse_if_body(parser_t *parser, ast_node_t **body) {
 
   IFJ_ERR err = parse_inline_cmd(parser, body);
   CHECK_ERR_RET(err);
+  if (parser_is_keyword(parser, KW_ELSE)) {
+    return IFJ_SUCCESS;
+  }
   return parser_expect_type(parser, TOK_EOL);
 }
 
