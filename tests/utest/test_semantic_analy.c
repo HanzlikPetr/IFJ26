@@ -1495,6 +1495,36 @@ static void test_check_indirect_recursion(void **state) {
            IFJ_SUCCESS, IFJ_ESEM_TYPE);
 }
 
+static void test_check_mixed_recursion_cycle(void **state) {
+  // Nepřímá rekurze s jednou funkcí bez explicitního návratového typu musí
+  // selhat, i když má druhá funkce v cyklu typ explicitní
+  sem_state_t *s = get_state(state);
+  run_case(s,
+           program(func("f", t_int(),
+                        block_st(call("g", args(lit_int(1), END), END), END),
+                        params(param("x", t_int()), END), END),
+                   func("g", t_unresolved(),
+                        block_st(call("f", args(lit_int(1), END), END), END),
+                        params(param("x", t_int()), END), END),
+                   main_func(block_st(END)), END),
+           IFJ_SUCCESS, IFJ_ESEM_TYPE);
+}
+
+static void test_check_indirect_recursion_all_explicit(void **state) {
+  // Nepřímá rekurze, kde všechny funkce v cyklu mají explicitní návratový
+  // typ, je povolena
+  sem_state_t *s = get_state(state);
+  run_case(s,
+           program(func("f", t_int(),
+                        block_st(call("g", args(lit_int(1), END), END), END),
+                        params(param("x", t_int()), END), END),
+                   func("g", t_int(),
+                        block_st(call("f", args(lit_int(1), END), END), END),
+                        params(param("x", t_int()), END), END),
+                   main_func(block_st(END)), END),
+           IFJ_SUCCESS, IFJ_SUCCESS);
+}
+
 // ---------------------------------------------------------------------------
 // Testy seznamů
 // ---------------------------------------------------------------------------
@@ -2081,6 +2111,10 @@ int main(void) {
                                       sem_teardown),
       cmocka_unit_test_setup_teardown(test_check_indirect_recursion, sem_setup,
                                       sem_teardown),
+      cmocka_unit_test_setup_teardown(test_check_mixed_recursion_cycle,
+                                      sem_setup, sem_teardown),
+      cmocka_unit_test_setup_teardown(
+          test_check_indirect_recursion_all_explicit, sem_setup, sem_teardown),
 
       // Seznamy
       cmocka_unit_test_setup_teardown(test_check_lists_ok, sem_setup,
