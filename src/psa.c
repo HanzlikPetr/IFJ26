@@ -3,6 +3,16 @@
  * @brief IFJ26 - Implementace precedenční syntaktické analýzy (PSA)
  *
  * @author xhanzlp00 Petr Hanzlík
+ *
+ * Podporu if výrazu vygeneroval AI asistent (agent OpenCode) podle
+ * tohoto zadání: když token je klíčové slovo if, vytvoř uzel AST_IF;
+ * za if musí být podmínka zpracovaná process_expression, poté
+ * klíčové slovo then, za ním větev then opět process_expression,
+ * dále povinné else s větví else. Výsledkem je neterminál E na
+ * zásobníku PSA, takže if výraz může být operandem libovolného
+ * výrazu. Duplicitní logika z parser.c byla odstraněna, parser.c
+ * nyní na PSA deleguje (uzel AST_IF vzniká v obou souborech - viz
+ * poznámka v parser.c a smlouva v psa.h).
  */
 
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
@@ -85,6 +95,8 @@ static const char psa_table[13][13] = {
     {'>', 'f', '>', '>', '>', '>', '>', '>', '>', 'f', '>', 'f', '>'},
     {'<', '<', '<', '<', '<', '<', '<', '<', '<', '<', 'f', '<', 'e'},
 };
+
+static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast);
 
 /**
  * @brief Převod tokenu na symbol PSA
@@ -299,7 +311,7 @@ static IFJ_ERR get_term_from_stack(stack_t *stack,
   CHECK_ARGS_NULL_RET(stack, stack_array, out_count);
   void *data_out;
   psa_stack_node_t *node;
-  bool found_nonterm = false;
+  bool found_term = false;
 
   *out_count = 0;
 
@@ -312,7 +324,7 @@ static IFJ_ERR get_term_from_stack(stack_t *stack,
     if (node->symbol != PSA_NONTERM && node->symbol != PSA_HANDLE) {
       // Nalezen symbol, který není neterminál ani zarážka
       *stack_top_symbol = node->symbol;
-      found_nonterm = true;
+      found_term = true;
       break;
     }
 
@@ -322,7 +334,7 @@ static IFJ_ERR get_term_from_stack(stack_t *stack,
     *out_count += 1;
   }
 
-  if (!found_nonterm) {
+  if (!found_term) {
     // Pokud nebyl nalezen symbol, který není neterminál ani zarážka, tak je
     // to chyba; odebrané uzly je nutné uvolnit, aby nedošlo k úniku paměti
     free_psa_stack_nodes(stack_array, *out_count);
@@ -336,7 +348,7 @@ static IFJ_ERR get_term_from_stack(stack_t *stack,
 }
 
 /**
- * @brief Vrátí uzly odebrané ze zásobníku funkcí get_nonterm_from_stack
+ * @brief Vrátí uzly odebrané ze zásobníku funkcí get_term_from_stack
  * zpět na vrchol zásobníku.
  *
  * Na vrcholu zásobníku nesmí ležet dva neterminály (E) ani zarážky (<)
@@ -1471,6 +1483,100 @@ static IFJ_ERR psa_equal(stack_t *stack, parser_t *parser,
 }
 
 /**
+ * @brief Zpracuje if výraz "if <výraz> then <výraz> else <výraz>".
+ *
+ * Uzel AST_IF vytvářejí oba soubory: tady v psa.c pro if výraz na pozici
+ * operandu (obě větve jsou vždy výrazy) a v parser.c pro if příkaz
+ * (parse_if_statement, parse_inline_if, větve mohou být i bloky příkazů).
+ *
+ * @param parser Parser stojící na klíčovém slově if.
+ * @param out_ast Výstupní AST uzel if výrazu.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR parse_if_expression(parser_t *parser, ast_node_t **out_ast) {
+  ast_node_t *if_ast = NULL;
+  IFJ_ERR err;
+
+  CHECK_ARGS_NULL_RET(parser, out_ast);
+
+  *out_ast = NULL;
+
+  // Aktuální token musí být klíčové slovo if
+  if (parser->current_token.type != TOK_KEYWORD ||
+      parser->current_token.value.keyword != KW_IF) {
+    err = IFJ_ESYNTAX;
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Expected 'if' keyword, got token type %d on line %d",
+                       parser->current_token.type, parser->current_token.line);
+  }
+
+  // Vytvoření AST uzlu pro if výraz
+  err = ast_create_node(&if_ast, AST_IF);
+  CHECK_ERR_LOG_GOTO(err, cleanup,
+                     "Failed to create AST node for if expression");
+
+  // Přeskočení klíčového slova if
+  token_free(&parser->current_token);
+  err = scanner_next_token(parser->scanner, &parser->current_token);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+  // Zpracování podmínky if výrazu
+  err = process_expression(parser, &if_ast->as.if_st.expr);
+  CHECK_ERR_LOG_GOTO(err, cleanup,
+                     "Failed to parse condition of if expression");
+
+  // Po podmínce musí následovat klíčové slovo then
+  if (parser->current_token.type != TOK_KEYWORD ||
+      parser->current_token.value.keyword != KW_THEN) {
+    err = IFJ_ESYNTAX;
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Expected 'then' keyword after if condition, got token "
+                       "type %d on line %d",
+                       parser->current_token.type, parser->current_token.line);
+  }
+
+  // Přeskočení klíčového slova then
+  token_free(&parser->current_token);
+  err = scanner_next_token(parser->scanner, &parser->current_token);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+  // Zpracování větve then
+  err = process_expression(parser, &if_ast->as.if_st.body);
+  CHECK_ERR_LOG_GOTO(err, cleanup,
+                     "Failed to parse then branch of if expression");
+
+  // Po větvi then musí následovat klíčové slovo else
+  if (parser->current_token.type != TOK_KEYWORD ||
+      parser->current_token.value.keyword != KW_ELSE) {
+    err = IFJ_ESYNTAX;
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Expected 'else' keyword after then branch of if "
+                       "expression, got token type %d on line %d",
+                       parser->current_token.type, parser->current_token.line);
+  }
+
+  // Přeskočení klíčového slova else
+  token_free(&parser->current_token);
+  err = scanner_next_token(parser->scanner, &parser->current_token);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
+
+  // Zpracování větve else
+  err = process_expression(parser, &if_ast->as.if_st.else_st);
+  CHECK_ERR_LOG_GOTO(err, cleanup,
+                     "Failed to parse else branch of if expression");
+
+  *out_ast = if_ast;
+  if_ast = NULL; // Předání vlastnictví if_ast do out_ast
+  return IFJ_SUCCESS;
+
+cleanup:
+  if (if_ast != NULL) {
+    ast_free(if_ast);
+  }
+  return err;
+}
+
+/**
  * @brief Zpracování výrazu pomocí precedenční analýzy
  * @param parser Parser
  * @param out_ast Výstupní AST uzel
@@ -1512,6 +1618,34 @@ static IFJ_ERR process_expression(parser_t *parser, ast_node_t **out_ast) {
 
   // Hlavní smyčka precedenční analýzy
   while (1) {
+    // zpracování if výrazu
+    if (expect_operand && parser->current_token.type == TOK_KEYWORD &&
+        parser->current_token.value.keyword == KW_IF) {
+      ast_node_t *if_ast = NULL;
+
+      err = parse_if_expression(parser, &if_ast);
+      CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to parse if expression");
+
+      push_node = create_psa_stack_node(PSA_NONTERM, if_ast, NULL);
+      if (!push_node) {
+        ast_free(if_ast);
+        err = IFJ_EINTERNAL;
+        CHECK_ERR_LOG_GOTO(err, cleanup,
+                           "Failed to create stack node for if expression");
+      }
+
+      err = stack_push(&stack, (void *)push_node);
+      if (err != IFJ_SUCCESS) {
+        LOG_ERR(err, "Failed to push if expression onto the stack");
+        psa_stack_node_dtor(push_node);
+        goto cleanup;
+      }
+      push_node = NULL;
+
+      expect_operand = false; // Za if výrazem se očekává operátor
+      continue;
+    }
+
     // Získání symbolu na vrcholu zásobníku, který není neterminál (E) nebo
     // zarážka (<)
     stack_array_get_nonterm_count = 0;
