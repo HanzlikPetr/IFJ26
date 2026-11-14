@@ -3,6 +3,12 @@
  * @brief IFJ26 - Implementace rekurzivního syntaktického analyzátoru
  *
  * @author xgleton00 Ondřej Glet
+ *
+ * Zpracování if výrazu bylo přeneseno do psa.c - úpravu vygeneroval
+ * AI asistent (agent OpenCode). parse_rhs nyní vždy volá
+ * psa_parse_expression, která if výraz "if <výraz> then <výraz>
+ * else <výraz>" sama rozpozná a zpracuje (viz parse_if_expression
+ * v psa.c). Uzel AST_IF tak vzniká v obou souborech: v psa.c.
  */
 
 #include <stdlib.h>
@@ -60,7 +66,6 @@ static IFJ_ERR parse_inline_cmd(parser_t *parser, ast_node_t **command);
 static IFJ_ERR parse_inline_if(parser_t *parser, ast_node_t **if_node);
 static IFJ_ERR parse_if_body(parser_t *parser, ast_node_t **body);
 static IFJ_ERR parse_if_statement(parser_t *parser, ast_node_t **if_node);
-static IFJ_ERR parse_if_expression(parser_t *parser, ast_node_t **if_node);
 static IFJ_ERR parse_while(parser_t *parser, ast_node_t **while_node);
 static IFJ_ERR parse_for(parser_t *parser, ast_node_t **for_node);
 static IFJ_ERR parse_generator(parser_t *parser, ast_node_t **generator);
@@ -517,10 +522,6 @@ cleanup:
 static IFJ_ERR parse_rhs(parser_t *parser, ast_node_t **rhs) {
   CHECK_ARGS_NULL_RET(parser, rhs);
 
-  if (parser_is_keyword(parser, KW_IF)) {
-    return parse_if_expression(parser, rhs);
-  }
-
   return psa_parse_expression(parser, rhs);
 }
 
@@ -832,65 +833,6 @@ static IFJ_ERR parse_if_statement(parser_t *parser, ast_node_t **if_node) {
     CHECK_ERR_GOTO(err, cleanup);
     break;
   }
-
-  return IFJ_SUCCESS;
-
-cleanup:
-  ast_free(*if_node);
-  *if_node = NULL;
-  return err;
-}
-
-/**
- * @brief Zpracuje jednu větev výrazu if.
- *
- * @param parser Parser s aktuálním tokenem větve.
- * @param branch Výstupní tělo větve.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR parse_if_expression_branch(parser_t *parser,
-                                          ast_node_t **branch) {
-  CHECK_ARGS_NULL_RET(parser, branch);
-
-  *branch = NULL;
-  if (parser_is_type(parser, TOK_EOL)) {
-    CHECK_ERR_RET(parser_next(parser));
-    return parse_block(parser, branch);
-  }
-
-  IFJ_ERR err = psa_parse_expression(parser, branch);
-  CHECK_ERR_RET(err);
-  return IFJ_SUCCESS;
-}
-
-/**
- * @brief Zpracuje if použitý jako výraz.
- *
- * @param parser Parser s klíčovým slovem if.
- * @param if_node Výstupní uzel výrazu if.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR parse_if_expression(parser_t *parser, ast_node_t **if_node) {
-  CHECK_ARGS_NULL_RET(parser, if_node);
-
-  *if_node = NULL;
-  CHECK_ERR_RET(ast_create_node(if_node, AST_IF));
-
-  IFJ_ERR err = parser_next(parser);
-  CHECK_ERR_GOTO(err, cleanup);
-  err = psa_parse_expression(parser, &(*if_node)->as.if_st.expr);
-  CHECK_ERR_GOTO(err, cleanup);
-  err = parser_expect_keyword(parser, KW_THEN);
-  CHECK_ERR_GOTO(err, cleanup);
-  err = parse_if_expression_branch(parser, &(*if_node)->as.if_st.body);
-  CHECK_ERR_GOTO(err, cleanup);
-  bool has_eol = false;
-  err = parser_accept_type(parser, TOK_EOL, &has_eol);
-  CHECK_ERR_GOTO(err, cleanup);
-  err = parser_expect_keyword(parser, KW_ELSE);
-  CHECK_ERR_GOTO(err, cleanup);
-  err = parse_if_expression_branch(parser, &(*if_node)->as.if_st.else_st);
-  CHECK_ERR_GOTO(err, cleanup);
 
   return IFJ_SUCCESS;
 
