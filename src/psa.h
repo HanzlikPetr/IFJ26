@@ -37,6 +37,14 @@
  * - Argumenty volání funkce se analyzují rekurzivním voláním
  *   psa_parse_expression - u patologicky zanořeného vstupu hrozí přetečení
  *   zásobníku.
+ * - Klíčové slovo if na pozici operandu zahajuje if výraz
+ *   "if <výraz> then <výraz> else <výraz>". Podmínka i obě větve se
+ *   zpracují rekurzivním voláním psa_parse_expression, větev else je
+ *   povinná. Výsledkem je neterminál E (uzel AST_IF) na zásobníku PSA, takže
+ *   if výraz může být operandem libovolného výrazu. Pozor: uzel AST_IF
+ *   vytvářejí OBĚ soubory - psa.c pro if výraz (parse_if_expression, obě
+ *   větve jsou vždy výrazy) a parser.c pro if příkaz (parse_if_statement,
+ *   parse_inline_if, jejichž větve mohou být i bloky příkazů).
  *
  * @param parser Ukazatel na parser.
  * @param out_ast Ukazatel na výstupní AST uzel.
