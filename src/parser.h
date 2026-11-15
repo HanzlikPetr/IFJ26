@@ -50,4 +50,17 @@ IFJ_ERR parser_parse(parser_t *parser, ast_node_t **root);
  */
 IFJ_ERR parser_destroy(parser_t *parser);
 
+/**
+ * @brief Zpracuje blok příkazů "INDENT <příkazy> DEDENT".
+ *
+ * Blok je tvořen tokenem INDENT, následovaným jedním či více příkazy a
+ * tokenem DEDENT. Funkci volá parser.c pro těla příkazů if/while/for a
+ * psa.c pro blokové větve víceřádkového if výrazu (rozšíření CONTROL).
+ *
+ * @param parser Parser s tokenem INDENT.
+ * @param block Výstupní uzel bloku.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+IFJ_ERR parse_block(parser_t *parser, ast_node_t **block);
+
 #endif
