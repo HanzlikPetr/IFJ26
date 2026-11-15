@@ -167,6 +167,21 @@ IFJ_ERR scanner_next_token(scanner_t *scanner, token_t *token);
 IFJ_ERR scanner_peek_next_token(scanner_t *scanner, token_t *token);
 
 /**
+ * @brief Vrátí už převzatý token zpět do fronty scanneru. Následující
+ * volání scanner_next_token vrátí tentýž token.
+ *
+ * Token se do scanneru přesune včetně vlastnictví alokovaných dat
+ * (str_value u TOK_ID/TOK_STRING) - volající po úspěchu nesmí token
+ * uvolňovat ani dále používat, token je vynulovaný. V zásobě smí být
+ * nejvýše jeden token, vrátit lze tedy jen jeden token (a to jen tehdy,
+ * nebyl-li před tím načten přes scanner_peek_next_token).
+ * @param scanner Stav scanneru.
+ * @param token Token k vrácení.
+ * @return IFJ_SUCCESS, IFJ_EINTERNAL při NULL argumentu nebo plné zásobě.
+ */
+IFJ_ERR scanner_unread_token(scanner_t *scanner, token_t *token);
+
+/**
  * @brief Uvolnění paměti tokenu
  * @param token Token k uvolnění
  * @return IFJ_SUCCESS úspěch, nebo IFJ_EINTERNAL pokud je token NULL

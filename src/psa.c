@@ -13,6 +13,15 @@
  * výrazu. Duplicitní logika z parser.c byla odstraněna, parser.c
  * nyní na PSA deleguje (uzel AST_IF vzniká v obou souborech - viz
  * poznámka v parser.c a smlouva v psa.h).
+ *
+ * Podporu blokových těl větší if výrazu (rozšíření CONTROL, varianty
+ * s těly větví na dalších řádcích s odsazením) také vygeneroval AI
+ * asistent (agent OpenCode) podle tohoto zadání: tělo větve zapsané
+ * na dalším řádku s odsazením se zpracuje jako blok příkazů funkcí
+ * parse_block. Protože blok větve else spotřebuje i EOL posledního
+ * řádku a DEDENT, vkládá se za něj syntetický EOL a skutečný token
+ * za ním se vrací do scanneru novou funkcí scanner_unread_token
+ * (podrobnosti viz parse_if_expr_push_eol).
  */
 
 #define _POSIX_C_SOURCE 200809L // Kvuli strdup
@@ -1483,11 +1492,113 @@ static IFJ_ERR psa_equal(stack_t *stack, parser_t *parser,
 }
 
 /**
+ * @brief Přeskočí jeden token konce řádku, je-li aktuálním tokenem.
+ *
+ * Víceřádkový if výraz (rozšíření CONTROL) umožňuje uvést tělo větve na
+ * dalším řádku: za klíčovým slovem then, před klíčovým slovem else i za
+ * ním se může vyskytnout token EOL. Prázdné a komentářové řádky skener
+ * žádný token EOL nevydává, stačí tedy přeskočit jediný EOL.
+ *
+ * @param parser Parser, jehož aktuální token se má zkontrolovat.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR parse_if_expr_skip_eol(parser_t *parser) {
+  CHECK_ARG_NULL_RET(parser);
+
+  if (parser->current_token.type != TOK_EOL) {
+    return IFJ_SUCCESS;
+  }
+
+  token_free(&parser->current_token);
+  return scanner_next_token(parser->scanner, &parser->current_token);
+}
+
+/**
+ * @brief Zjistí, zda aktuální token přirozeně ukončuje if výraz.
+ *
+ * @param parser Parser s aktuálním tokenem za zpracovanou větví else.
+ * @return True, pokud token výraz přirozeně ukončuje.
+ */
+static bool parse_if_expr_natural_end(const parser_t *parser) {
+  switch (parser->current_token.type) {
+  case TOK_EOL:
+    return true;
+
+  case TOK_KEYWORD:
+    switch (parser->current_token.value.keyword) {
+    case KW_THEN:
+    case KW_ELSE:
+    case KW_DO:
+      return true;
+    default:
+      return false;
+    }
+
+  case TOK_ID:
+    // Kontextuální klíčová slova for-generátoru
+    // "for i <- výraz to/until výraz [by výraz] do"
+    return strcmp(parser->current_token.value.str_value, "to") == 0 ||
+           strcmp(parser->current_token.value.str_value, "until") == 0 ||
+           strcmp(parser->current_token.value.str_value, "by") == 0;
+
+  default:
+    return false;
+  }
+}
+
+/**
+ * @brief Vloží za blokovou větví else syntetický token EOL.
+ *
+ * Blok větve else (INDENT ... DEDENT) spotřebuje v parse_block i EOL
+ * posledního řádku bloku, takže po návratu je aktuálním tokenem první
+ * token NÁSLEDUJÍCÍHO příkazu (např. identifikátor), DEDENT, EOF, nebo
+ * token přirozeně ukončující výraz (viz parse_if_expr_natural_end).
+ * Vnější PSA by pak buď pokračovala ve výrazu dál ([DOLLAR][ID] = '<'
+ * posune i token dalšího příkazu), nebo by příkazy parseru místo EOL
+ * viděly cizí token.
+ *
+ * @param parser Parser s aktuálním tokenem za blokem větve else.
+ * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
+ */
+static IFJ_ERR parse_if_expr_push_eol(parser_t *parser) {
+  int line;
+  IFJ_ERR err;
+
+  CHECK_ARG_NULL_RET(parser);
+
+  // Token, za kterým výraz přirozeně končí, se nemění
+  if (parse_if_expr_natural_end(parser)) {
+    return IFJ_SUCCESS;
+  }
+
+  line = parser->current_token.line;
+
+  // Vrácení skutečného tokenu do scanneru - vlastnictví tokenu
+  // (včetně alokovaného str_value) přechází na scanner.
+  err = scanner_unread_token(parser->scanner, &parser->current_token);
+  CHECK_ERR_LOG_RET(err, "Failed to unread token after else block");
+
+  // Nahrazení aktuálního tokenu syntetickým EOL
+  parser->current_token.type = TOK_EOL;
+  parser->current_token.value.str_value = NULL;
+  parser->current_token.line = line;
+  parser->current_token.newline_before = false;
+  return IFJ_SUCCESS;
+}
+
+/**
  * @brief Zpracuje if výraz "if <výraz> then <výraz> else <výraz>".
  *
- * Uzel AST_IF vytvářejí oba soubory: tady v psa.c pro if výraz na pozici
- * operandu (obě větve jsou vždy výrazy) a v parser.c pro if příkaz
- * (parse_if_statement, parse_inline_if, větve mohou být i bloky příkazů).
+ * Podle rozšíření CONTROL může být tělo větve uvedeno i na dalším řádku:
+ * za then, před else i za else se přeskočí jeden token EOL (varianty
+ * "if x < 0 then 0 - x else" apod.). Je-li po přeskočeném EOL dalším
+ * tokenem INDENT, je tělem větve blok příkazů (INDENT ... DEDENT)
+ * zpracovaný funkcí parse_block, jinak jde o výraz.
+ *
+ * Bloková větev else přitom v parse_block spotřebuje i EOL posledního
+ * řádku bloku. Aby if výraz správně ukončila vnější PSA i příkazy
+ * parseru, vloží se za ni syntetický EOL a skutečný token za ním se
+ * vrátí do scanneru (parse_if_expr_push_eol, scanner_unread_token).
  *
  * @param parser Parser stojící na klíčovém slově if.
  * @param out_ast Výstupní AST uzel if výrazu.
@@ -1540,10 +1651,25 @@ static IFJ_ERR parse_if_expression(parser_t *parser, ast_node_t **out_ast) {
   err = scanner_next_token(parser->scanner, &parser->current_token);
   CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
 
-  // Zpracování větve then
-  err = process_expression(parser, &if_ast->as.if_st.body);
-  CHECK_ERR_LOG_GOTO(err, cleanup,
-                     "Failed to parse then branch of if expression");
+  // Větev then může být i na dalším řádku
+  err = parse_if_expr_skip_eol(parser);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to skip EOL after 'then' keyword");
+
+  // Zpracování větve then: je-li dalším tokenem INDENT, je tělem větve
+  // blok příkazů, jinak jde o výraz.
+  if (parser->current_token.type == TOK_INDENT) {
+    err = parse_block(parser, &if_ast->as.if_st.body);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to parse then block of if expression");
+  } else {
+    err = process_expression(parser, &if_ast->as.if_st.body);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to parse then branch of if expression");
+  }
+
+  // Před klíčovým slovem else může být konec řádku
+  err = parse_if_expr_skip_eol(parser);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to skip EOL before 'else' keyword");
 
   // Po větvi then musí následovat klíčové slovo else
   if (parser->current_token.type != TOK_KEYWORD ||
@@ -1560,10 +1686,28 @@ static IFJ_ERR parse_if_expression(parser_t *parser, ast_node_t **out_ast) {
   err = scanner_next_token(parser->scanner, &parser->current_token);
   CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to get next token from scanner");
 
-  // Zpracování větve else
-  err = process_expression(parser, &if_ast->as.if_st.else_st);
-  CHECK_ERR_LOG_GOTO(err, cleanup,
-                     "Failed to parse else branch of if expression");
+  // Větev else může být i na dalším řádku
+  err = parse_if_expr_skip_eol(parser);
+  CHECK_ERR_LOG_GOTO(err, cleanup, "Failed to skip EOL after 'else' keyword");
+
+  // Zpracování větve else: je-li dalším tokenem INDENT, je tělem větve
+  // blok příkazů, jinak jde o výraz.
+  if (parser->current_token.type == TOK_INDENT) {
+    err = parse_block(parser, &if_ast->as.if_st.else_st);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to parse else block of if expression");
+
+    // Blok větve else spotřebuje i svůj EOL a DEDENT - za blokem se
+    // vloží syntetický EOL, aby if výraz ukončila vnější PSA i příkazy
+    // parseru (viz parse_if_expr_push_eol).
+    err = parse_if_expr_push_eol(parser);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to push synthetic EOL after else block");
+  } else {
+    err = process_expression(parser, &if_ast->as.if_st.else_st);
+    CHECK_ERR_LOG_GOTO(err, cleanup,
+                       "Failed to parse else branch of if expression");
+  }
 
   *out_ast = if_ast;
   if_ast = NULL; // Předání vlastnictví if_ast do out_ast

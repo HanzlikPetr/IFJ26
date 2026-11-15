@@ -1033,3 +1033,20 @@ IFJ_ERR scanner_peek_next_token(scanner_t *scanner, token_t *token) {
   *token = scanner->peeked;
   return IFJ_SUCCESS;
 }
+
+IFJ_ERR scanner_unread_token(scanner_t *scanner, token_t *token) {
+  CHECK_ARGS_NULL_RET(scanner, token);
+
+  // V zásobě už je token načtený přes peek, vrácený token bychom
+  // ztratili - vrátit lze jen jeden token.
+  if (scanner->has_peeked) {
+    return IFJ_EINTERNAL;
+  }
+
+  // Vlastnictví tokenu (včetně alokovaného str_value) přechází na
+  // scanner, volajícímu se token vynuluje.
+  scanner->peeked = *token;
+  scanner->has_peeked = true;
+  memset(token, 0, sizeof(*token));
+  return IFJ_SUCCESS;
+}
