@@ -807,8 +807,13 @@ static IFJ_ERR search_variable_in_stack(sem_ctx_t *ctx, const char *var_name,
   symtable_t **remove_from_stack_symt_arr = NULL;
   IFJ_ERR err = IFJ_SUCCESS;
   bool is_empty = false;
-  int max_stack_depth = ctx->current_scope_level; // Maximální hloubka zásobníku
-                                                  // pro lokální tabulky symbolů
+  int max_stack_depth =
+      (ctx->current_scope_level > 0)
+          ? ctx->current_scope_level
+          : 1; // Maximální hloubka zásobníku pro lokální tabulky symbolů.
+               // Tělo funkce zapsané jako jediný výraz nemá vlastní blok,
+               // takže úroveň zanoření je 0, ale tabulka funkce na zásobníku
+               // stále je.
   int current_stack_depth = 0;
 
   err = stack_is_empty(&ctx->local_scopes, &is_empty);
@@ -1724,13 +1729,42 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
         expr_node->as.var.id = strdup(var_data.var.code_gen_name);
         CHECK_MEM_ERR(expr_node->as.var.id);
       } else {
-        // Není to proměnná - holý identifikátor není platné volání funkce,
-        // funkce se vždy volají se seznamem argumentů (i když je prázdný)
-        LOG_ERR(IFJ_ESEM_UNDEF,
-                "Variable or parameterless function '%s' not found in symbol "
-                "tables.",
-                expr_node->as.var.id);
-        return IFJ_ESEM_UNDEF;
+        // Může jít o funkci bez seznamu parametrů (PARAMLISTS), která se
+        // volá pouhým uvedením jména bez závorek.
+        symtable_data_t *func_data = NULL;
+        IFJ_ERR func_err = symtable_find(ctx->global_symtable,
+                                         expr_node->as.var.id, &func_data);
+
+        if (func_err != IFJ_ESEM_UNDEF && CHECK_ERR(func_err)) {
+          LOG_ERR(func_err,
+                  "Failed to find function '%s' in global symbol "
+                  "table.",
+                  expr_node->as.var.id);
+          return func_err;
+        }
+
+        if (func_err == IFJ_SUCCESS && func_data->is_function &&
+            func_data->func.param_list_count == 0) {
+          // Převod na volání funkce bez seznamů argumentů.
+          char *func_name = expr_node->as.var.id;
+          expr_node->type = AST_FUNC_CALL;
+          expr_node->as.func_call.id = func_name;
+          expr_node->as.func_call.param_lists = NULL;
+          expr_node->as.func_call.param_lists_cnt = 0;
+
+          if (func_data->func.return_type.type == TYPE_UNRESOLVED) {
+            CHECK_ERR_LOG_RET(check_function(ctx->global_symtable, func_data),
+                              "Failed to check function '%s'.", func_name);
+          }
+
+          *result_type = func_data->func.return_type;
+        } else {
+          LOG_ERR(IFJ_ESEM_UNDEF,
+                  "Variable or parameterless function '%s' not found in "
+                  "symbol tables.",
+                  expr_node->as.var.id);
+          return IFJ_ESEM_UNDEF;
+        }
       }
     }
   }
