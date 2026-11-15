@@ -1,0 +1,8 @@
+// Spravny program: LISTS - List.range a indexace seznamu (spec 5.8)
+import ifj26.*
+
+@main def main(): Unit =
+  val lst = List.range(1, 10)
+  val x = lst(2)
+  print(x)
+  print("\n")
