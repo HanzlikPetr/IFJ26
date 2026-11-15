@@ -1,0 +1,8 @@
+// Spravny program: LISTS - prevod rozsahu na seznam (spec 5.8)
+import ifj26.*
+
+@main def main(): Unit =
+  val itemsList: List[Int] = (1 to 5).toList
+  val lstStr = itemsList.toString
+  print(lstStr)
+  print("\n")

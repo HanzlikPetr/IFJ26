@@ -1,0 +1,17 @@
+// Spravny program: VALMEM - cteni clenu hodnot teckovou notaci (spec 5.4)
+import ifj26.*
+
+@main def main(): Unit =
+  val text = "abc"
+  val number = 2.9
+  val answer = 42
+  print(text.length)
+  print("\n")
+  print(number.toInt)
+  print("\n")
+  print(number.floor.toInt)
+  print("\n")
+  print(number.toString)
+  print("\n")
+  print(answer.toString)
+  print("\n")
