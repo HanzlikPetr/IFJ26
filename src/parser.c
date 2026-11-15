@@ -59,7 +59,6 @@ static IFJ_ERR parse_var_def(parser_t *parser, ast_node_t **definition);
 static IFJ_ERR parse_val_def(parser_t *parser, ast_node_t **definition);
 static IFJ_ERR parse_func_ret(parser_t *parser, ast_node_t **ret);
 static IFJ_ERR parse_func_ret_opt(parser_t *parser, ast_node_t **rhs);
-static IFJ_ERR parse_block(parser_t *parser, ast_node_t **block);
 static IFJ_ERR parse_block_cmd(parser_t *parser, ast_node_t **command);
 static IFJ_ERR parse_assign_or_expr(parser_t *parser, ast_node_t **node);
 static IFJ_ERR parse_inline_cmd(parser_t *parser, ast_node_t **command);
@@ -843,13 +842,17 @@ cleanup:
 }
 
 /**
- * @brief Zpracuje blok příkazů podle pravidla <block>.
+ * @brief Zpracuje blok příkazů "INDENT <příkazy> DEDENT".
+ *
+ * Blok je tvořen tokenem INDENT, následovaným jedním či více příkazy a
+ * tokenem DEDENT. Funkci volá parser.c pro těla příkazů if/while/for a
+ * psa.c pro blokové větve víceřádkového if výrazu (rozšíření CONTROL).
  *
  * @param parser Parser s tokenem INDENT.
  * @param block Výstupní uzel bloku.
  * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
  */
-static IFJ_ERR parse_block(parser_t *parser, ast_node_t **block) {
+IFJ_ERR parse_block(parser_t *parser, ast_node_t **block) {
   CHECK_ARGS_NULL_RET(parser, block);
 
   *block = NULL;
