@@ -7,6 +7,7 @@
 
 #include "ast.h"
 #include "error.h"
+#include "generator.h"
 #include "parser.h"
 #include "scanner.h"
 #include "semantic_analy.h"
@@ -34,6 +35,9 @@ int main() {
   CHECK_ERR_GOTO(err, cleanup);
 
   err = check_functions(root, &functions_table);
+  CHECK_ERR_GOTO(err, cleanup);
+
+  err = generator_generate(root);
   CHECK_ERR_GOTO(err, cleanup);
 
 cleanup:
