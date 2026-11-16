@@ -52,7 +52,6 @@ static IFJ_ERR parse_param_next(parser_t *parser, ast_node_t *param_list);
 static IFJ_ERR parse_type_id(parser_t *parser, ifj26_type_t *type);
 static IFJ_ERR parse_opt_type(parser_t *parser, ifj26_type_t *type);
 static IFJ_ERR parse_func_body(parser_t *parser, ast_node_t **body);
-static IFJ_ERR parse_rhs(parser_t *parser, ast_node_t **rhs);
 static IFJ_ERR parse_definition(parser_t *parser, ast_node_t **definition,
                                 bool mutable);
 static IFJ_ERR parse_var_def(parser_t *parser, ast_node_t **definition);
@@ -499,7 +498,7 @@ static IFJ_ERR parse_func_body(parser_t *parser, ast_node_t **body) {
     return parse_block(parser, body);
   }
 
-  IFJ_ERR err = parse_rhs(parser, body);
+  IFJ_ERR err = psa_parse_expression(parser, body);
   CHECK_ERR_GOTO(err, cleanup);
   err = parser_expect_type(parser, TOK_EOL);
   CHECK_ERR_GOTO(err, cleanup);
@@ -509,19 +508,6 @@ cleanup:
   ast_free(*body);
   *body = NULL;
   return err;
-}
-
-/**
- * @brief Zpracuje pravou stranu definice, přiřazení nebo návratu.
- *
- * @param parser Parser s aktuálním tokenem začátku pravé strany.
- * @param rhs Výstupní uzel pravé strany.
- * @return IFJ_SUCCESS při úspěchu nebo chybový kód.
- */
-static IFJ_ERR parse_rhs(parser_t *parser, ast_node_t **rhs) {
-  CHECK_ARGS_NULL_RET(parser, rhs);
-
-  return psa_parse_expression(parser, rhs);
 }
 
 /**
@@ -554,7 +540,7 @@ static IFJ_ERR parse_definition(parser_t *parser, ast_node_t **definition,
   err = parser_expect_type(parser, TOK_ASSIGN);
   CHECK_ERR_GOTO(err, cleanup);
 
-  err = parse_rhs(parser, &(*definition)->as.def.rhs);
+  err = psa_parse_expression(parser, &(*definition)->as.def.rhs);
   CHECK_ERR_GOTO(err, cleanup);
 
   err = parser_expect_type(parser, TOK_EOL);
@@ -605,7 +591,7 @@ static IFJ_ERR parse_func_ret_opt(parser_t *parser, ast_node_t **rhs) {
     return IFJ_SUCCESS;
   }
 
-  return parse_rhs(parser, rhs);
+  return psa_parse_expression(parser, rhs);
 }
 
 /**
@@ -668,7 +654,7 @@ static IFJ_ERR parse_assign_or_expr(parser_t *parser, ast_node_t **node) {
   err = parser_expect_type(parser, TOK_ASSIGN);
   CHECK_ERR_GOTO(err, cleanup);
 
-  err = parse_rhs(parser, &(*node)->as.assign.rhs);
+  err = psa_parse_expression(parser, &(*node)->as.assign.rhs);
   CHECK_ERR_GOTO(err, cleanup);
 
   return IFJ_SUCCESS;
