@@ -37,20 +37,19 @@
  * - Argumenty volání funkce se analyzují rekurzivním voláním
  *   psa_parse_expression - u patologicky zanořeného vstupu hrozí přetečení
  *   zásobníku.
- * - Klíčové slovo if na pozici operandu zahajuje if výraz. Podmínka i obě větve se
- *   zpracují rekurzivním voláním psa_parse_expression, větev else je
- *   povinná. Za then, před else i za else se přeskočí jeden token EOL, 
- *   takže tělo větve může být i na dalším řádku; je-li po
- *   přeskočeném EOL dalším tokenem INDENT, je tělem větve blok příkazů
- *   zpracovaný parse_block, jinak jde o výraz. Za blokovou větví else
- *   se navíc vloží syntetický EOL a skutečný token za ním se vrátí do
- *   scanneru (scanner_unread_token), takže vnější PSA i volající
- *   příkazy vidí if výraz ukončený jako každý jiný výraz; tokeny
- *   then/else/do a to/until/by se vkládání výjimečně vyhnou, protože
- *   za kompletním výrazem legitimně následují v hlavičkách if/while/for.
- *   Pozor: uzel
- *   AST_IF vytvářejí OBĚ soubory - psa.c pro if výraz (parse_if_expression)
- *   a parser.c pro if příkaz (parse_if_statement, parse_inline_if).
+ * - Klíčové slovo if na pozici operandu zahajuje if výraz. Podmínka i obě větve
+ *   se zpracují rekurzivním voláním psa_parse_expression, větev else je
+ *   povinná. Za then, před else i za else se přeskočí jeden token EOL, takže
+ *   tělo větve může být i na dalším řádku; je-li po přeskočeném EOL dalším
+ *   tokenem INDENT, je tělem větve blok příkazů zpracovaný parse_block, jinak
+ *   jde o výraz. Za blokovou větví else se navíc vloží syntetický EOL a
+ *   skutečný token za ním se vrátí do scanneru (scanner_unread_token), takže
+ *   vnější PSA i volající příkazy vidí if výraz ukončený jako každý jiný výraz;
+ *   tokeny then/else/do a to/until/by se vkládání výjimečně vyhnou, protože za
+ *   kompletním výrazem legitimně následují v hlavičkách if/while/for. Pozor:
+ *   uzel AST_IF vytvářejí OBĚ soubory - psa.c pro if výraz
+ *   (parse_if_expression) a parser.c pro if příkaz (parse_if_statement,
+ *   parse_inline_if).
  *
  * @param parser Ukazatel na parser.
  * @param out_ast Ukazatel na výstupní AST uzel.

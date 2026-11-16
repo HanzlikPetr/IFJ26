@@ -173,7 +173,7 @@ static void test_deep_destruction(void **state) {
 
   assert_int_equal(stack_push(stack, inst), IFJ_SUCCESS);
 
-    // Destroy stack and pass the custom destructor
+  // Destroy stack and pass the custom destructor
   assert_int_equal(stack_deep_dtor(stack, complicated_struct_dtor),
                    IFJ_SUCCESS);
 }
