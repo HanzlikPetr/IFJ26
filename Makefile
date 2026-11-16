@@ -86,7 +86,7 @@ format:
 # Pravidlo pro vytvoření archivu
 #---------------------------------------------------
 zip: clean
-	zip -r xhanzlp00.zip src tests Makefile rozdeleni dokumentace.pdf
+	zip -r xhanzlp00.zip src Makefile rozdeleni dokumentace.pdf rozsireni
 
 
 #---------------------------------------------------
