@@ -4,6 +4,10 @@
  *
  * @author xberanm00 Marek Beran
  */
+/*
+ * TODO:
+ * vyresit ty returny - podle AST_FUNC_RET
+ */
 
 // --- libraries ---
 #include <inttypes.h>
@@ -423,6 +427,104 @@ static IFJ_ERR assign(ast_node_t *assign) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @param id Identifikátor volající podmínky.
+ */
+static IFJ_ERR condition_body(ast_node_t *body, int id, int **ids) {
+  CHECK_ARGS_NULL_RET(body, ids);
+  IFJ_ERR err;
+
+  for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
+    ast_node_t *instruction = body->as.block.commands[i];
+
+    if (instruction->type == AST_IF) {
+      err = condition(instruction, id + 1);   // to id by mozna mohlo byt nedane => naslo by se to jako nejpravejsi (nejvetsi) uzel ze stromu + 1 => tahle funkce by mohle byt ciste generate body (prejmenovat generate_func_body)
+      CHECK_ERR_RET(err);
+    } else {
+      err = generate_instruction(instruction);
+      CHECK_ERR_RET(err);
+    }
+  }
+
+  printf("\tJUMP else%d\n", id);    // ukončení podmínky
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @param id Slouží k vytváření návěští.
+ */
+static IFJ_ERR condition(ast_node_t *if_st, int id) {
+  CHECK_ARG_NULL_RET(if_st);
+  IFJ_ERR err;
+  char *snippet;
+  static int **ids; // udelat z toho strom -> asi staci az na realny odevzdani
+
+  printf("LABEL start%d\n", id);    // redundant?
+  
+  switch (if_st->as.if_st.expr->type)
+  {
+  case AST_VAR:
+    err = get_snippet(if_st->as.if_st.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    free(snippet);
+    break;
+
+  case AST_LITERAL:
+    err = get_snippet(if_st->as.if_st.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    free(snippet);
+    break;
+
+  case AST_EXPR:
+    err = calc_expression(if_st->as.if_st.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    break;
+
+  case AST_FUNC_CALL:
+    err = call_func(if_st->as.if_st.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tPOPS GF@temp\n");
+    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    break;
+  
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Unknown condition expression type");
+    return IFJ_EINTERNAL; 
+  }
+
+  /*// vytvoř else if skoků
+  for (size_t i = 1; i <= if_st->as.if_st.else_if_cnt; i++) {
+    err = else_condition_expr(if_st->as.if_st.else_if[i], id + i, ids);   // jelikoz to je jiny AST_TYPE
+    CHECK_ERR_RET(err);
+  }
+  printf("\tJUMP else%d\n", id);
+
+  // vytvoř else if bloků
+  for (size_t i = 1; i <= if_st->as.if_st.else_if_cnt; i++) {
+    err = condition_body(if_st->as.if_st.else_if[i], id + i, ids);   // jelikoz to je jiny AST_TYPE
+    CHECK_ERR_RET(err);
+  }*/
+
+  if (if_st->as.if_st.else_st) {    // else větev nemusí existovat
+    printf("LABEL else%d\n", id);
+    err = condition_body(if_st->as.if_st.else_st, id, ids);
+    CHECK_ERR_RET(err);
+  }
+
+  printf("LABEL then%d\n", id);
+  err = condition_body(if_st->as.if_st.body, id, ids);
+  CHECK_ERR_RET(err);
+
+  return IFJ_SUCCESS;
+}
+
 static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
   CHECK_ARG_NULL_RET(literal);
 
@@ -544,14 +646,14 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = calc_expression(instruction);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS GF@temp\n");
+    printf("\tPUSHS GF@temp\n");    // kvuli dosavadnimu reseni returnu
     break;
 
   case AST_VAR: // 6
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);
+    printf("\tPUSHS %s\n", snippet);    // kvuli dosavadnimu reseni returnu
     free(snippet);
     break;
 
@@ -559,7 +661,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);
+    printf("\tPUSHS %s\n", snippet);    // kvuli dosavadnimu reseni returnu
     free(snippet);
     break;
 
@@ -570,8 +672,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     return assign(instruction);
 
   case AST_IF: // 10
-    printf("\tif statement - TODO\n");
-    break;
+    return condition(instruction, 0);
 
   case AST_FOR: // 12
     printf("\tfor cycle - TODO\n");
@@ -674,6 +775,7 @@ static IFJ_ERR generate_funcitons(ast_node_t *root) {
 
 // ==================== EXPORTOVANÉ FUNKCE ====================
 IFJ_ERR generator_generate(ast_node_t *root) {
+  ast_print(root);
   CHECK_ARG_NULL_RET(root);
 
   if (root->type != AST_ROOT) {
