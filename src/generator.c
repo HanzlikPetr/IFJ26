@@ -16,6 +16,7 @@
 
 // ==================== POMOCNÉ FUNKCE ====================
 static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet);
+static IFJ_ERR call_func(ast_node_t *func_call);
 
 static IFJ_ERR start_code(ast_node_t *root) {
   // CHECK_ARG_NULL_RET(root); // redundant
@@ -25,8 +26,6 @@ static IFJ_ERR start_code(ast_node_t *root) {
   printf("\tDEFVAR GF@temp\n");
   printf("\tDEFVAR GF@tempLeft\n");
   printf("\tDEFVAR GF@tempRight\n\n");
-
-  printf("\t# Dodelat vestavene funkce!!\n\n");
 
   // najde main funkci a zavolá jí
   ast_node_t *function;
@@ -39,14 +38,28 @@ static IFJ_ERR start_code(ast_node_t *root) {
 
     if (function->as.func.main) {
       // zavolání main
+      printf("\t# Run main\n");
+      printf("\tCREATEFRAME\n");
+      printf("\tPUSHFRAME\n");
       printf("\tCALL %s\n", function->as.func.id);
       printf("\tEXIT int@0\n\n");   // úspěšné ukončení programu
-      return IFJ_SUCCESS;
     }
   }
 
-  LOG_ERR(IFJ_EINTERNAL, "No main function found");
-  return IFJ_EINTERNAL;
+  printf("\t# Built-in functions\n");
+
+  printf(
+    "LABEL print\n"
+      "\tDEFVAR LF@symb\n"
+      "\tPOPS LF@symb\n"
+      "\tWRITE LF@symb\n"
+      "\tRETURN\n"
+  );
+
+  printf("\n");
+
+  printf("\t# User defined functions\n");
+  return IFJ_SUCCESS;
 }
 
 static IFJ_ERR format_str(char **value) {
@@ -218,6 +231,11 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
     if (expr->as.expr.unary.operand->type == AST_EXPR) {
       err = calc_expression(expr->as.expr.unary.operand);
       CHECK_ERR_RET(err);
+    } else if (expr->as.expr.unary.operand->type == AST_FUNC_CALL) {
+      err = call_func(expr->as.expr.unary.operand);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@temp\n");
     } else {
       err = get_snippet(expr->as.expr.unary.operand, &snippet);
       CHECK_ERR_RET(err);
@@ -238,6 +256,11 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
       CHECK_ERR_RET(err);
 
       printf("\tMOVE GF@tempLeft GF@temp\n");
+    } else if (expr->as.expr.binary.lhs->type == AST_FUNC_CALL) {
+      err = call_func(expr->as.expr.binary.lhs);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@tempLeft\n");
     } else {
       err = get_snippet(expr->as.expr.binary.lhs, &snippet);
       CHECK_ERR_RET(err);
@@ -254,6 +277,11 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
       CHECK_ERR_RET(err);
 
       printf("\tMOVE GF@tempRight GF@temp\n");
+    } else if (expr->as.expr.binary.rhs->type == AST_FUNC_CALL) {
+      err = call_func(expr->as.expr.binary.rhs);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@tempRight\n");
     } else {
       err = get_snippet(expr->as.expr.binary.rhs, &snippet);
       CHECK_ERR_RET(err);
@@ -312,6 +340,7 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
   }
   printf("\tPUSHFRAME\n");
   printf("\tCALL %s\n", func_call->as.func_call.id);
+  printf("\tPOPFRAME\n");
   return IFJ_SUCCESS;
 }
 
@@ -332,20 +361,63 @@ static IFJ_ERR define_var(ast_node_t *def) {
     err = get_snippet(def->as.def.rhs, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tMOVE LF@%s LF@%s\n", def->as.def.id, snippet);
+    printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
     free(snippet);
   } else if (def->as.def.rhs->type == AST_FUNC_CALL) {
     // TODO
     err = call_func(def->as.def.rhs);
     CHECK_ERR_RET(err);
 
-    printf("\tPOPFRAME\n");
     printf("\tPOPS LF@%s\n", def->as.def.id);
     printf("\tCLEARS\n\n");
   } else if (def->as.def.rhs->type == AST_EXPR) {
     err = calc_expression(def->as.def.rhs);
     CHECK_ERR_RET(err);
     printf("\tMOVE LF@%s GF@temp\n", def->as.def.id);
+  }
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR assign(ast_node_t *assign) {
+  CHECK_ARG_NULL_RET(assign);
+  IFJ_ERR err;
+  char *snippet;
+
+  switch (assign->as.assign.rhs->type)
+  {
+  case AST_EXPR:
+    err = calc_expression(assign->as.assign.rhs);
+    CHECK_ERR_RET(err);
+
+    printf("\tMOVE LF@%s GF@temp\n", assign->as.assign.id);
+    break;
+
+  case AST_VAR:
+    err = get_snippet(assign->as.assign.rhs, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tMOVE LF@%s %s\n", assign->as.assign.id, snippet);
+    free(snippet);
+    break;
+
+  case AST_LITERAL:
+    err = get_snippet(assign->as.assign.rhs, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tMOVE LF@%s %s\n", assign->as.assign.id, snippet);
+    free(snippet);
+    break;
+
+  case AST_FUNC_CALL:
+    err = call_func(assign->as.assign.rhs);
+    CHECK_ERR_RET(err);
+
+    printf("\tPOPS LF@%s\n", assign->as.assign.id);
+    break;
+  
+  default:
+    break;
   }
 
   return IFJ_SUCCESS;
@@ -415,8 +487,7 @@ static IFJ_ERR get_var(ast_node_t *var, char **snippet) {
 
   size_t len = strlen(var->as.var.id) + 1;
   *snippet = malloc(len);
-  CHECK_MEM_ERR(snippet);
-  // vzdy to bude z LF@id..
+  CHECK_MEM_ERR(*snippet);
   memcpy(*snippet, var->as.var.id, len); // tohle bude chtit refaktorizovat
 
   int n = snprintf(NULL, 0, "LF@%s", *snippet);
@@ -438,7 +509,7 @@ cleanup_all:
   free(s);
 
 cleanup:
-  free(snippet);
+  free(*snippet);
   return IFJ_EINTERNAL;
 }
 
@@ -457,7 +528,7 @@ static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet) {
 
   default:
     printf("\tINSTRUCTION: %d\n", instruction->type);
-    LOG_ERR(IFJ_EINTERNAL, "Unknown instruction given");
+    LOG_ERR(IFJ_EINTERNAL, "Unknown instruction given to get_snippet");
     return IFJ_EINTERNAL;
   }
 }
@@ -496,8 +567,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     return define_var(instruction);
 
   case AST_ASSIGN: // 9
-    printf("\tassignment to existing var - TODO\n");
-    break;
+    return assign(instruction);
 
   case AST_IF: // 10
     printf("\tif statement - TODO\n");
@@ -518,7 +588,6 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   case AST_FUNC_CALL: // 18
     err = call_func(instruction);
     CHECK_ERR_RET(err);
-    printf("\tPOPFRAME\n");
     // if (instruction->as.func_call)
     // printf("\tPOPS LF@%s\n", def->as.def.id); - potrebuju flag z ast_func ze
     // to ma neco vratit
@@ -567,7 +636,7 @@ static IFJ_ERR generate_function(ast_node_t *function) {
     CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Passed argument is not a function");
   }
 
-  printf("%s:\n", function->as.func.id); // vytvoří návěští funkce
+  printf("LABEL %s\n", function->as.func.id); // vytvoří návěští funkce
 
   // vytvoří lokální kopie parametrů
   printf("\t#Local copies of parameters\n");
@@ -605,9 +674,6 @@ static IFJ_ERR generate_funcitons(ast_node_t *root) {
 
 // ==================== EXPORTOVANÉ FUNKCE ====================
 IFJ_ERR generator_generate(ast_node_t *root) {
-  ast_print(root); // vypsani ast stromu
-  printf("==================== OUTPUT ====================\n");
-
   CHECK_ARG_NULL_RET(root);
 
   if (root->type != AST_ROOT) {
