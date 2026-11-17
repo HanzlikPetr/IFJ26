@@ -93,6 +93,6 @@ zip: clean
 # Pravidlo pro čištění repozitáře
 #---------------------------------------------------
 clean:
-	rm -f  $(SRCS_OBJS) $(TESTS_OBJS) $(TEST_TARGETS) $(ALL_DEPS) $(TARGET)
+	rm -f  $(SRCS_OBJS) $(TESTS_OBJS) $(TEST_TARGETS) $(ALL_DEPS) $(TARGET) xhanzlp00.zip
 
 -include $(ALL_DEPS)
