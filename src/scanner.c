@@ -3,6 +3,12 @@
  * @brief IFJ26 - Implementace scanneru
  *
  * @author xjurokv00 Vojtěch Jurok
+ *
+ * Převod stavu scanneru ze statických proměnných do struktury scanner_t
+ * provedl AI Claude Opus.
+ * Prompt: "Přepiš scanner.c, scanner.h a test_scanner.c tak, aby
+ * se stav scanneru místo statických proměnných ukládal do struktury
+ * scanner_t předávané funkcím jako parametr. Logiku automatu neměň."
  */
 
 #include <ctype.h>
