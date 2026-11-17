@@ -429,6 +429,52 @@ static IFJ_ERR assign(ast_node_t *assign) {
   return IFJ_SUCCESS;
 }
 
+static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
+  CHECK_ARG_NULL_RET(elif);
+  IFJ_ERR err;
+  char *snippet;
+
+  switch (elif->as.else_if_st.expr->type)
+  {
+  case AST_VAR:
+    err = get_snippet(elif->as.else_if_st.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    free(snippet);
+    break;
+
+  case AST_LITERAL:
+    err = get_snippet(elif->as.else_if_st.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    free(snippet);
+    break;
+
+  case AST_EXPR:
+    err = calc_expression(elif->as.else_if_st.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    break;
+
+  case AST_FUNC_CALL:
+    err = call_func(elif->as.else_if_st.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tPOPS GF@temp\n");
+    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    break;
+  
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Unknown condition expression type");
+    return IFJ_EINTERNAL; 
+  }
+
+  return IFJ_SUCCESS;
+}
+
 /**
  * @param id Slouží k vytváření návěští.
  */
@@ -479,18 +525,24 @@ static IFJ_ERR condition(ast_node_t *if_st) {
     return IFJ_EINTERNAL; 
   }
 
-  /*// vytvoř else if skoků
-  for (size_t i = 1; i <= if_st->as.if_st.else_if_cnt; i++) {
-    err = else_condition_expr(if_st->as.if_st.else_if[i], id + i, ids);   // jelikoz to je jiny AST_TYPE
+  int elif_ids[if_st->as.if_st.else_if_cnt];
+
+  // vytvoření else if skoků
+  for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
+    elif_ids[i] = ++last_id;
+    err = else_condition_expr(if_st->as.if_st.else_if[i], elif_ids[i]);   // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
   }
   printf("\tJUMP else%d\n", id);
 
   // vytvoř else if bloků
-  for (size_t i = 1; i <= if_st->as.if_st.else_if_cnt; i++) {
-    err = condition_body(if_st->as.if_st.else_if[i], id + i, ids);   // jelikoz to je jiny AST_TYPE
+  for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
+    printf("LABEL then%d\n", elif_ids[i]);
+    err = generate_body(if_st->as.if_st.else_if[i]->as.else_if_st.body);   // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
-  }*/
+
+    printf("\tJUMP end%d\n", id);
+  }
 
   if (if_st->as.if_st.else_st) {    // else větev nemusí existovat
     printf("LABEL else%d\n", id);
