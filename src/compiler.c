@@ -37,7 +37,7 @@ int main() {
   err = check_functions(root, &functions_table);
   CHECK_ERR_GOTO(err, cleanup);
 
-  err = generator_generate(root);
+  err = generate(root);
   CHECK_ERR_GOTO(err, cleanup);
 
 cleanup:

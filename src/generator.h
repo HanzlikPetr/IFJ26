@@ -14,6 +14,6 @@
 #include "ast.h"
 #include "error.h"
 
-IFJ_ERR generator_generate(ast_node_t *root);
+IFJ_ERR generate(ast_node_t *root);
 
 #endif // IFJ_GENERATOR_H
