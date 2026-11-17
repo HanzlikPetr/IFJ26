@@ -27,32 +27,77 @@
 # a únik paměti nebo jiná chyba paměti test shodí. Valgrind se dá vypnout
 # proměnnou VALGRIND=0.
 #
-# Proměnné prostředí: COMPILER (výchozí ./ifj26), INTERPRET (výchozí ic26int),
-# VALGRIND (výchozí 1).
-# CATEGORIES (výchozí "1_lex 2_syntax" - kategorie testů, které se spouští).
+# Proměnné prostředí: COMPILER (výchozí ./ifj26),
+# INTERPRET (výchozí ./ic26int-linux-x86_64), INTERPRET_FLAGS (výchozí prázdné),
+# VALGRIND (výchozí 1), TIMEOUT (limit v sekundách na jeden běh interpretu,
+# výchozí 10; 0 = bez limitu).
+# CATEGORIES (výchozí všechny kategorie - viz níže).
 
 COMPILER=${COMPILER:-./ifj26}
-INTERPRET=${INTERPRET:-ic26int}
+INTERPRET=${INTERPRET:-./ic26int-linux-x86_64}
+INTERPRET_FLAGS=${INTERPRET_FLAGS:-}
 VALGRIND=${VALGRIND:-1}
+TIMEOUT=${TIMEOUT:-10}
 DIR="$(dirname "$0")/../data"
 
 # Návratový kód Valgrindu při chybě paměti, nesmí kolidovat s kódy překladače.
 VALGRIND_ERR=100
 
-# Zatím je implementovaný jen lexikální a syntaktický analyzátor, takže se
-# standardně spouštějí jen testy chyb 1 a 2. Po dokončení dalších fází
-# překladače lze přidat další kategorie, např.:
-#   CATEGORIES="1_lex 2_syntax 3_undef 4_redef" bash tests/system/run_systests.sh
-CATEGORIES=${CATEGORIES:-"0_ok 1_lex 2_syntax 3_undef 4_redef 5_args 6_type 7_immut 10_other"}
+# Standardně se spouštějí všechny kategorie. Během vývoje se dají omezit
+# proměnnou CATEGORIES, např.:
+#   CATEGORIES="1_lex 2_syntax" bash tests/system/run_systests.sh
+CATEGORIES=${CATEGORIES:-"0_ok 1_lex 2_syntax 3_undef 4_redef 5_args 6_type 7_immut 10_other 40_runtime"}
 
-if [ ! -x "$COMPILER" ]; then
-  echo "Překladač $COMPILER neexistuje, nejdřív spusť make."
+# Vrátí cestu ke spustitelnému nástroji, nebo nic (prázdný výstup).
+resolve_tool() {
+  if [ -f "$1" ] && [ -x "$1" ]; then
+    printf '%s\n' "$1"
+    return 0
+  fi
+  command -v "$1" 2>/dev/null
+}
+
+# ic26int musí být skutečný ELF binární soubor (ne např. přepsaný textový
+# výstup překladače, který je omylem spustitelný).
+is_elf() {
+  [ "$(head -c4 -- "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "7f454c46" ]
+}
+
+# Slovní popis návratových kódů interpretu ic26int (spec 7.1).
+interpret_msg() {
+  case "$1" in
+    50) echo "chybné parametry interpretu" ;;
+    51) echo "lexikální/syntaktická chyba IFJcode26" ;;
+    52) echo "sémantická chyba IFJcode26 (redefinice / neexistující návěští)" ;;
+    53) echo "runtime: špatné typy operandů" ;;
+    54) echo "runtime: neexistující proměnná" ;;
+    55) echo "runtime: neexistující rámec" ;;
+    56) echo "runtime: chybějící hodnota" ;;
+    57) echo "runtime: špatná hodnota operandu" ;;
+    58) echo "runtime: chybná práce s řetězcem/polem" ;;
+    124) echo "timeout" ;;
+    *) echo "neznámý kód" ;;
+  esac
+}
+
+COMPILER_BIN=$(resolve_tool "$COMPILER")
+INTERPRET_BIN=$(resolve_tool "$INTERPRET")
+
+if [ -z "$COMPILER_BIN" ]; then
+  echo "Překladač $COMPILER neexistuje, nejdřív spusť make." >&2
   exit 1
 fi
 
 HAVE_INTERPRET=0
-if command -v "$INTERPRET" >/dev/null 2>&1; then
-  HAVE_INTERPRET=1
+if [ -n "$INTERPRET_BIN" ]; then
+  if is_elf "$INTERPRET_BIN" ||
+    head -n1 -- "$INTERPRET_BIN" 2>/dev/null | grep -q '^#!'; then
+    HAVE_INTERPRET=1
+  else
+    echo "CHYBA: $INTERPRET_BIN není spustitelný program (očekáván ELF)." >&2
+    echo "       Stáhni ic26int znovu z e-learningu (spec 7.1)." >&2
+    exit 1
+  fi
 fi
 
 HAVE_VALGRIND=0
@@ -63,7 +108,8 @@ fi
 TMP_CODE=$(mktemp)
 TMP_OUT=$(mktemp)
 TMP_VG=$(mktemp)
-trap 'rm -f "$TMP_CODE" "$TMP_OUT" "$TMP_VG"' EXIT
+TMP_IERR=$(mktemp)
+trap 'rm -f "$TMP_CODE" "$TMP_OUT" "$TMP_VG" "$TMP_IERR"' EXIT
 
 pass=0
 fail=0
@@ -79,7 +125,7 @@ for category in $CATEGORIES; do
     # Kontrola paměti překladače pod Valgrindem
     if [ "$HAVE_VALGRIND" -eq 1 ]; then
       valgrind --quiet --leak-check=full --track-origins=yes \
-        --error-exitcode="$VALGRIND_ERR" "$COMPILER" <"$test" \
+        --error-exitcode="$VALGRIND_ERR" "$COMPILER_BIN" <"$test" \
         >/dev/null 2>"$TMP_VG"
       if [ $? -eq "$VALGRIND_ERR" ]; then
         echo "FAIL $name: Valgrind našel chybu paměti:"
@@ -88,7 +134,7 @@ for category in $CATEGORIES; do
       fi
     fi
 
-    "$COMPILER" <"$test" >"$TMP_CODE" 2>/dev/null
+    "$COMPILER_BIN" <"$test" >"$TMP_CODE" 2>/dev/null
     rc=$?
 
     # Chyba při překladu (kódy 1-7, 10)
@@ -109,6 +155,14 @@ for category in $CATEGORIES; do
       continue
     fi
 
+    # Překladač musí vygenerovat platný IFJcode26 (jinak by interpret
+    # hlásil nesmyslnou chybu 51 a nebylo by vidět, že chyba je v generátoru).
+    if ! head -n1 "$TMP_CODE" | grep -Fqx '.IFJcode26'; then
+      echo "FAIL $name: výstup překladače nezačíná řádkem .IFJcode26"
+      fail=$((fail + 1))
+      continue
+    fi
+
     if [ "$HAVE_INTERPRET" -eq 0 ]; then
       skip=$((skip + 1))
       continue
@@ -116,11 +170,20 @@ for category in $CATEGORIES; do
 
     input="${test%.ifj}.in"
     [ -f "$input" ] || input=/dev/null
-    "$INTERPRET" "$TMP_CODE" <"$input" >"$TMP_OUT" 2>/dev/null
+
+    if [ "$TIMEOUT" -gt 0 ] 2>/dev/null; then
+      timeout --foreground "$TIMEOUT" \
+        "$INTERPRET_BIN" $INTERPRET_FLAGS "$TMP_CODE" \
+        <"$input" >"$TMP_OUT" 2>"$TMP_IERR"
+    else
+      "$INTERPRET_BIN" $INTERPRET_FLAGS "$TMP_CODE" \
+        <"$input" >"$TMP_OUT" 2>"$TMP_IERR"
+    fi
     rc=$?
 
     if [ "$rc" -ne "$expected" ]; then
-      echo "FAIL $name: interpret vrátil $rc, očekáváno $expected"
+      echo "FAIL $name: interpret vrátil $rc ($(interpret_msg "$rc")), očekáváno $expected"
+      sed 's/^/    /' "$TMP_IERR"
       fail=$((fail + 1))
       continue
     fi
@@ -128,6 +191,7 @@ for category in $CATEGORIES; do
     expected_out="${test%.ifj}.out"
     if [ -f "$expected_out" ] && ! cmp -s "$TMP_OUT" "$expected_out"; then
       echo "FAIL $name: výstup se liší od $(basename "$expected_out")"
+      diff -u "$expected_out" "$TMP_OUT" | sed 's/^/    /'
       fail=$((fail + 1))
       continue
     fi
@@ -136,7 +200,7 @@ for category in $CATEGORIES; do
 done
 
 echo ""
-echo "Prošlo: $pass, selhalo: $fail, přeskočeno (chybí $INTERPRET): $skip"
+echo "Prošlo: $pass, selhalo: $fail, přeskočeno (chybí interpret $INTERPRET): $skip"
 if [ "$HAVE_VALGRIND" -eq 1 ]; then
   echo "Chyby paměti (Valgrind): $mem_fail"
 else
