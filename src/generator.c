@@ -19,19 +19,44 @@
 #include "generator.h"
 #include "printer_tree.h"
 
+// ==================== STRUKTURY ====================
+typedef struct {
+  char **data;
+  size_t size;
+} global_ids_t;
+
+global_ids_t global_ids;
+
 // ==================== POMOCNÉ FUNKCE ====================
+
+static IFJ_ERR global_ids_ctor(global_ids_t *global_ids) {
+  // pole s hlavickou
+  global_ids->data = malloc(sizeof(char *) * 1);
+  CHECK_MEM_ERR(global_ids->data);
+
+  global_ids->size = 1;
+  global_ids->data[0] = NULL;
+
+  return IFJ_SUCCESS;
+}
+
+static void global_ids_dtor(global_ids_t *global_ids) {
+  free(global_ids->data);
+}
+
 static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet);
 static IFJ_ERR call_func(ast_node_t *func_call);
 static IFJ_ERR generate_body(ast_node_t *body);
+static IFJ_ERR generate_instruction(ast_node_t *instruction);
 
 static IFJ_ERR start_code(ast_node_t *root) {
   // CHECK_ARG_NULL_RET(root); // redundant
   puts(".IFJcode26");
 
   printf("\n\t# Initialization of global variables\n");
-  printf("\tDEFVAR GF@temp\n");
-  printf("\tDEFVAR GF@tempLeft\n");
-  printf("\tDEFVAR GF@tempRight\n\n");
+  printf("\tDEFVAR GF@-temp\n");
+  printf("\tDEFVAR GF@-tempLeft\n");
+  printf("\tDEFVAR GF@-tempRight\n\n");
 
   // najde main funkci a zavolá jí
   ast_node_t *function;
@@ -54,13 +79,11 @@ static IFJ_ERR start_code(ast_node_t *root) {
 
   printf("\t# Built-in functions\n");
 
-  printf(
-    "LABEL print\n"
-      "\tDEFVAR LF@symb\n"
-      "\tPOPS LF@symb\n"
-      "\tWRITE LF@symb\n"
-      "\tRETURN\n"
-  );
+  printf("LABEL print\n"
+         "\tDEFVAR LF@symb\n"
+         "\tPOPS LF@symb\n"
+         "\tWRITE LF@symb\n"
+         "\tRETURN\n");
 
   printf("\n");
 
@@ -166,55 +189,57 @@ static IFJ_ERR get_op(token_type_t type, const char **snippet) {
 
   switch (type) {
   case TOK_EQ:
-    *snippet = "\tEQ GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_NEQ:
-    *snippet = "\tEQ GF@temp GF@tempLeft GF@tempRight\n\tNOT GF@temp\n";
+    *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tNOT GF@-temp\n";
     break;
 
   case TOK_LT:
-    *snippet = "\tLT GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tLT GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_GT:
-    *snippet = "\tGT GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tGT GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_LEQ:
-    *snippet = "\tEQ GF@temp GF@tempLeft GF@tempRight\n\tPUSHS GF@temp\n\tLT "
-               "GF@temp GF@tempLeft GF@tempRight\n\tPOPS GF@tempLeft\n\tOR "
-               "GF@temp GF@temp GF@tempLeft\n";
+    *snippet =
+        "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n\tLT "
+        "GF@-temp GF@-tempLeft GF@-tempRight\n\tPOPS GF@-tempLeft\n\tOR "
+        "GF@-temp GF@-temp GF@-tempLeft\n";
     break;
 
   case TOK_GEQ:
-    *snippet = "\tEQ GF@temp GF@tempLeft GF@tempRight\n\tPUSHS GF@temp\n\tGT "
-               "GF@temp GF@tempLeft GF@tempRight\n\tPOPS GF@tempLeft\n\tOR "
-               "GF@temp GF@temp GF@tempLeft\n";
+    *snippet =
+        "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n\tGT "
+        "GF@-temp GF@-tempLeft GF@-tempRight\n\tPOPS GF@-tempLeft\n\tOR "
+        "GF@-temp GF@-temp GF@-tempLeft\n";
     break;
 
   case TOK_ADD:
-    *snippet = "\tADD GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_SUB:
-    *snippet = "\tSUB GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tSUB GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_MUL:
-    *snippet = "\tMUL GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tMUL GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_DIV:
-    *snippet = "\tDIV GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_AND:
-    *snippet = "\tAND GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tAND GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_OR:
-    *snippet = "\tOR GF@temp GF@tempLeft GF@tempRight\n";
+    *snippet = "\tOR GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   default:
@@ -241,16 +266,16 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
       err = call_func(expr->as.expr.unary.operand);
       CHECK_ERR_RET(err);
 
-      printf("\tPOPS GF@temp\n");
+      printf("\tPOPS GF@-temp\n");
     } else {
       err = get_snippet(expr->as.expr.unary.operand, &snippet);
       CHECK_ERR_RET(err);
 
-      printf("\tMOVE GF@temp %s\n", snippet);
+      printf("\tMOVE GF@-temp %s\n", snippet);
       free(snippet);
     }
 
-    printf("\tNOT GF@temp\n");
+    printf("\tNOT GF@-temp\n");
   } else {
     if (expr->as.expr.operator_type == TOK_NOT) { // jediný nebinární operand
       return IFJ_EINTERNAL;
@@ -261,45 +286,45 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
       err = calc_expression(expr->as.expr.binary.lhs);
       CHECK_ERR_RET(err);
 
-      printf("\tMOVE GF@tempLeft GF@temp\n");
+      printf("\tMOVE GF@-tempLeft GF@-temp\n");
     } else if (expr->as.expr.binary.lhs->type == AST_FUNC_CALL) {
       err = call_func(expr->as.expr.binary.lhs);
       CHECK_ERR_RET(err);
 
-      printf("\tPOPS GF@tempLeft\n");
+      printf("\tPOPS GF@-tempLeft\n");
     } else {
       err = get_snippet(expr->as.expr.binary.lhs, &snippet);
       CHECK_ERR_RET(err);
 
-      printf("\tMOVE GF@tempLeft %s\n", snippet);
+      printf("\tMOVE GF@-tempLeft %s\n", snippet);
       free(snippet);
     }
 
-    printf("\tPUSHS GF@tempLeft\n\n");
+    printf("\tPUSHS GF@-tempLeft\n\n");
 
     // získání pravé strany
     if (expr->as.expr.binary.rhs->type == AST_EXPR) {
       err = calc_expression(expr->as.expr.binary.rhs);
       CHECK_ERR_RET(err);
 
-      printf("\tMOVE GF@tempRight GF@temp\n");
+      printf("\tMOVE GF@-tempRight GF@-temp\n");
     } else if (expr->as.expr.binary.rhs->type == AST_FUNC_CALL) {
       err = call_func(expr->as.expr.binary.rhs);
       CHECK_ERR_RET(err);
 
-      printf("\tPOPS GF@tempRight\n");
+      printf("\tPOPS GF@-tempRight\n");
     } else {
       err = get_snippet(expr->as.expr.binary.rhs, &snippet);
       CHECK_ERR_RET(err);
 
-      printf("\tMOVE GF@tempRight %s\n", snippet);
+      printf("\tMOVE GF@-tempRight %s\n", snippet);
       free(snippet);
     }
 
-    printf("\tPUSHS GF@tempRight\n\n");
-    printf("\tPOPS GF@tempRight\n");
+    printf("\tPUSHS GF@-tempRight\n\n");
+    printf("\tPOPS GF@-tempRight\n");
 
-    printf("\tPOPS GF@tempLeft\n\n");
+    printf("\tPOPS GF@-tempLeft\n\n");
 
     err = get_op(expr->as.expr.operator_type, (const char **)&snippet);
     CHECK_ERR_RET(err);
@@ -337,7 +362,7 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
       } else if (param->type == AST_EXPR) {
         err = calc_expression(param);
         CHECK_ERR_RET(err);
-        printf("\tPUSHS GF@temp\n");
+        printf("\tPUSHS GF@-temp\n");
       } else {
         LOG_ERR(IFJ_EINTERNAL, "Unknown parameter type");
         return IFJ_EINTERNAL;
@@ -379,7 +404,7 @@ static IFJ_ERR define_var(ast_node_t *def) {
   } else if (def->as.def.rhs->type == AST_EXPR) {
     err = calc_expression(def->as.def.rhs);
     CHECK_ERR_RET(err);
-    printf("\tMOVE LF@%s GF@temp\n", def->as.def.id);
+    printf("\tMOVE LF@%s GF@-temp\n", def->as.def.id);
   }
 
   return IFJ_SUCCESS;
@@ -390,13 +415,12 @@ static IFJ_ERR assign(ast_node_t *assign) {
   IFJ_ERR err;
   char *snippet;
 
-  switch (assign->as.assign.rhs->type)
-  {
+  switch (assign->as.assign.rhs->type) {
   case AST_EXPR:
     err = calc_expression(assign->as.assign.rhs);
     CHECK_ERR_RET(err);
 
-    printf("\tMOVE LF@%s GF@temp\n", assign->as.assign.id);
+    printf("\tMOVE LF@%s GF@-temp\n", assign->as.assign.id);
     break;
 
   case AST_VAR:
@@ -421,7 +445,7 @@ static IFJ_ERR assign(ast_node_t *assign) {
 
     printf("\tPOPS LF@%s\n", assign->as.assign.id);
     break;
-  
+
   default:
     break;
   }
@@ -434,8 +458,7 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
   IFJ_ERR err;
   char *snippet;
 
-  switch (elif->as.else_if_st.expr->type)
-  {
+  switch (elif->as.else_if_st.expr->type) {
   case AST_VAR:
     err = get_snippet(elif->as.else_if_st.expr, &snippet);
     CHECK_ERR_RET(err);
@@ -456,20 +479,20 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
     err = calc_expression(elif->as.else_if_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
     break;
 
   case AST_FUNC_CALL:
     err = call_func(elif->as.else_if_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tPOPS GF@temp\n");
-    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    printf("\tPOPS GF@-temp\n");
+    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
     break;
-  
+
   default:
     LOG_ERR(IFJ_EINTERNAL, "Unknown condition expression type");
-    return IFJ_EINTERNAL; 
+    return IFJ_EINTERNAL;
   }
 
   return IFJ_SUCCESS;
@@ -486,9 +509,8 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   int id = ++last_id;
 
   printf("LABEL start%d\n", id);    // redundant?
-  
-  switch (if_st->as.if_st.expr->type)
-  {
+
+  switch (if_st->as.if_st.expr->type) {
   case AST_VAR:
     err = get_snippet(if_st->as.if_st.expr, &snippet);
     CHECK_ERR_RET(err);
@@ -509,20 +531,20 @@ static IFJ_ERR condition(ast_node_t *if_st) {
     err = calc_expression(if_st->as.if_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
     break;
 
   case AST_FUNC_CALL:
     err = call_func(if_st->as.if_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tPOPS GF@temp\n");
-    printf("\tJUMPIFEQ then%d GF@temp bool@true\n", id);
+    printf("\tPOPS GF@-temp\n");
+    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
     break;
-  
+
   default:
     LOG_ERR(IFJ_EINTERNAL, "Unknown condition expression type");
-    return IFJ_EINTERNAL; 
+    return IFJ_EINTERNAL;
   }
 
   int elif_ids[if_st->as.if_st.else_if_cnt];
@@ -530,7 +552,8 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   // vytvoření else if skoků
   for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
     elif_ids[i] = ++last_id;
-    err = else_condition_expr(if_st->as.if_st.else_if[i], elif_ids[i]);   // jelikoz to je jiny AST_TYPE
+    err = else_condition_expr(if_st->as.if_st.else_if[i],
+                              elif_ids[i]);   // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
   }
   printf("\tJUMP else%d\n", id);
@@ -538,13 +561,15 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   // vytvoř else if bloků
   for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
     printf("LABEL then%d\n", elif_ids[i]);
-    err = generate_body(if_st->as.if_st.else_if[i]->as.else_if_st.body);   // jelikoz to je jiny AST_TYPE
+    err =
+        generate_body(if_st->as.if_st.else_if[i]
+                          ->as.else_if_st.body); // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
 
     printf("\tJUMP end%d\n", id);
   }
 
-  if (if_st->as.if_st.else_st) {    // else větev nemusí existovat
+  if (if_st->as.if_st.else_st) { // else větev nemusí existovat
     printf("LABEL else%d\n", id);
     err = generate_body(if_st->as.if_st.else_st);
     CHECK_ERR_RET(err);
@@ -557,6 +582,115 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   CHECK_ERR_RET(err);
 
   printf("LABEL end%d\n\n", id);
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR def_loop_var(ast_node_t *def) {
+  CHECK_ARG_NULL_RET(def);
+  char *snippet;
+  IFJ_ERR err;
+
+  for (size_t i = 1; i < global_ids.size; i++) {
+    if (strcmp(def->as.def.id, global_ids.data[i]) ==
+        0) { // kdyz uz to je definovany, uz to znovu nedefinuju
+      err = get_snippet(def->as.def.rhs, &snippet);
+      CHECK_ERR_RET(err);
+      printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
+      free(snippet);
+      return IFJ_SUCCESS;
+    }
+  }
+
+  printf("\tDEFVAR LF@%s\n", def->as.def.id);
+
+  char **p = realloc(global_ids.data, (global_ids.size + 1) * sizeof *p);
+  CHECK_MEM_ERR(p);
+  global_ids.data = p;
+
+  global_ids.data[global_ids.size] = def->as.def.id;
+  global_ids.size = global_ids.size + 1;
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR while_loop(ast_node_t *while_st) {
+  CHECK_ARG_NULL_RET(while_loop);
+  IFJ_ERR err;
+  char *snippet;
+  static int last_id = 0;
+  int id = ++last_id;
+  ast_node_t *body = while_st->as.while_st.body;
+
+  // definování vnořených proměnných cyklů
+  for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
+    ast_node_t *instruction = body->as.block.commands[i];
+
+    if (instruction->type == AST_DEF) {
+      err = def_loop_var(instruction);
+      CHECK_ERR_RET(err);
+    }
+  }
+
+  printf("LABEL whileStart%d\n", id);
+
+  switch (while_st->as.while_st.expr->type) {
+  case AST_VAR:
+    err = get_snippet(while_st->as.while_st.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFNEQ whileEnd%d %s bool@true\n", id, snippet);
+    free(snippet);
+    break;
+
+  case AST_LITERAL:
+    err = get_snippet(while_st->as.while_st.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFNEQ whileEnd%d %s bool@true\n", id, snippet);
+    free(snippet);
+    break;
+
+  case AST_EXPR:
+    err = calc_expression(while_st->as.while_st.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tJUMPIFNEQ whileEnd%d GF@-temp bool@true\n", id);
+    break;
+
+  case AST_FUNC_CALL:
+    err = call_func(while_st->as.while_st.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tPOPS GF@-temp\n");
+    printf("\tJUMPIFNEQ whileEnd%d GF@-temp bool@true\n", id);
+    break;
+
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Unknown condition expression type");
+    return IFJ_EINTERNAL;
+  }
+
+  printf("LABEL whileBody%d\n", id);
+
+  // generuje každou instrukci
+  for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
+    ast_node_t *instruction = body->as.block.commands[i];
+
+    if (instruction->type == AST_DEF) {
+      err = def_loop_var(instruction);
+      CHECK_ERR_RET(err);
+    } else if (instruction->type == AST_ASSIGN) {
+      err = assign(instruction); // uz to je inicializovany v globalu
+    } else {
+      err = generate_instruction(instruction);
+      CHECK_ERR_RET(err);
+    }
+  }
+
+  printf("\tJUMP whileStart%d\n", id);
+
+  printf("LABEL whileEnd%d\n", id);
 
   return IFJ_SUCCESS;
 }
@@ -682,14 +816,14 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = calc_expression(instruction);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS GF@temp\n");    // kvuli dosavadnimu reseni returnu
+    printf("\tPUSHS GF@-temp\n"); // kvuli dosavadnimu reseni returnu
     break;
 
   case AST_VAR: // 6
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);    // kvuli dosavadnimu reseni returnu
+    printf("\tPUSHS %s\n", snippet); // kvuli dosavadnimu reseni returnu
     free(snippet);
     break;
 
@@ -697,7 +831,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);    // kvuli dosavadnimu reseni returnu
+    printf("\tPUSHS %s\n", snippet); // kvuli dosavadnimu reseni returnu
     free(snippet);
     break;
 
@@ -715,7 +849,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     break;
 
   case AST_WHILE: // 16
-    printf("\twhile cycle - TODO\n");
+    return while_loop(instruction);
     break;
 
   case AST_FUNC_RET: // 17
@@ -794,7 +928,6 @@ static IFJ_ERR generate_function(ast_node_t *function) {
   printf("\tRETURN\n\n"); // az pridam reakci na func_ret tak to mozna bude
                           // redundantni (nebo to tam necham 2x abych to nemusel
                           // kontrolovat jestli to tam uz je) - TODO
-
   return IFJ_SUCCESS;
 }
 
@@ -812,19 +945,27 @@ static IFJ_ERR generate_funcitons(ast_node_t *root) {
 // ==================== EXPORTOVANÉ FUNKCE ====================
 IFJ_ERR generate(ast_node_t *root) {
   CHECK_ARG_NULL_RET(root);
+  // ast_print(root);
+  IFJ_ERR err;
 
   if (root->type != AST_ROOT) {
     CHECK_ERR_LOG_RET(IFJ_EINTERNAL,
                       "Abstract syntax tree doesn't have a root");
   }
 
-  IFJ_ERR err;
+  err = global_ids_ctor(&global_ids);
+  CHECK_ERR_RET(err);
 
   err = start_code(root);
-  CHECK_ERR_RET(err);
+  CHECK_ERR_GOTO(err, cleanup);
 
   err = generate_funcitons(root);
-  CHECK_ERR_RET(err);
+  CHECK_ERR_GOTO(err, cleanup);
 
+  global_ids_dtor(&global_ids);
   return IFJ_SUCCESS;
+
+cleanup:
+  global_ids_dtor(&global_ids);
+  return IFJ_EINTERNAL;
 }
