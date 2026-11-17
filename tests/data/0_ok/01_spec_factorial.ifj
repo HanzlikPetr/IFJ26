@@ -1,4 +1,4 @@
-// Spravny program: priklad ze zadani (vstup prazdny -> readInt vrati 0)
+// Spravny program: priklad ze zadani (vstup 5 -> vypise 120)
 import ifj26.*
 
 def factorial(n: Int): Int =
