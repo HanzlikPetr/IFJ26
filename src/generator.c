@@ -6,12 +6,10 @@
  */
 /*
  * TODO:
- * vyresit ty returny - podle AST_FUNC_RET
- * pridat type union ()
+ * vyresit ty returny - podle AST_FUNC_RET - pouze kdyz tam je return
  */
 
 // --- libraries ---
-#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,15 +75,195 @@ static IFJ_ERR start_code(ast_node_t *root) {
     }
   }
 
+  printf("LABEL -error\n"
+         "\tEXIT int@40\n");
+
   printf("\t# Built-in functions\n");
 
   printf("LABEL print\n"
          "\tDEFVAR LF@symb\n"
          "\tPOPS LF@symb\n"
          "\tWRITE LF@symb\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL readLine\n"
+         "\tREAD GF@-temp string\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL readInt\n"
+         "\tREAD GF@-temp int\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL readDouble\n"
+         "\tREAD GF@-temp float\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL toStr\n"
+         "\tDEFVAR LF@type\n"
+         "\tPOPS GF@-temp\n"
+         "\tTYPE LF@type GF@-temp\n"
+         "\tJUMPIFEQ -toStrEnd LF@type string@string\n"
+         "\tJUMPIFEQ -toStrInt LF@type string@int\n"
+         "\tJUMPIFEQ -toStrFloat LF@type string@float\n"
+         "\tJUMPIFEQ -error LF@type string@nil\n" // tohle by mel byt asi error?
+         // je to bool
+         "\tJUMPIFEQ -toStrTrue GF@-temp bool@true\n"
+
+         "\n\tMOVE GF@-temp string@false\n"
+         "\tJUMP -toStrEnd\n"
+
+         "\nLABEL -toStrTrue\n"
+         "\tMOVE GF@-temp string@true\n"
+         "\tJUMP -toStrEnd\n"
+
+         "\nLABEL -toStrInt\n"
+         "\tINT2STR GF@-temp GF@-temp\n"
+         "\tJUMP -toStrEnd\n"
+
+         "\nLABEL -toStrFloat\n"
+         "\tFLOAT2STR GF@-temp GF@-temp\n"
+
+         "\nLABEL -toStrEnd\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL toInt\n"
+         "\tPOPS GF@-temp\n"
+         "\tFLOAT2INT GF@-temp GF@-temp\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL strLength\n"
+         "\tPOPS GF@-temp\n"
+         "\tSTRLEN GF@-temp GF@-temp\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL subStr\n"
+         "\t#Local copies of parameters\n"
+         "\tDEFVAR LF@end$0\n"
+         "\tPOPS LF@end$0\n"
+         "\tDEFVAR LF@start$0\n"
+         "\tPOPS LF@start$0\n"
+         "\tDEFVAR LF@value$0\n"
+         "\tPOPS LF@value$0\n"
+         "\n\t# Definition of local variables\n"
+         "\tDEFVAR LF@len$1\n"
+         "\tDEFVAR LF@res$1\n"
+         "\tDEFVAR LF@i$1\n"
+         "\n\tCREATEFRAME\n"
+         "\tPUSHS LF@value$0\n"
+         "\tPUSHFRAME\n"
+         "\tCALL strLength\n"
+         "\tPOPFRAME\n"
+         "\tPOPS LF@len$1\n"
+         "\tCLEARS\n"
+         "\nLABEL -subStrConditions\n"
+         "\tMOVE GF@-tempLeft LF@start$0\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight int@0\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tLT GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tJUMPIFEQ -error GF@-temp bool@true\n"
+         "\tMOVE GF@-tempLeft LF@end$0\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight int@0\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tLT GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tJUMPIFEQ -error GF@-temp bool@true\n"
+         "\tMOVE GF@-tempLeft LF@start$0\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight LF@end$0\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tGT GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tJUMPIFEQ -error GF@-temp bool@true\n"
+         "\tMOVE GF@-tempLeft LF@start$0\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight LF@len$1\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tPUSHS GF@-temp\n"
+         "\tGT GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\tOR GF@-temp GF@-temp GF@-tempLeft\n"
+         "\tJUMPIFEQ -error GF@-temp bool@true\n"
+         "\tMOVE GF@-tempLeft LF@end$0\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight LF@len$1\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tGT GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tJUMPIFEQ -error GF@-temp bool@true\n"
+         "\n\tMOVE LF@res$1 string@\n"
+         "\tMOVE LF@i$1 LF@start$0\n"
+         "\n\t# Definition of loop variables\n"
+         "\tDEFVAR LF@c$2\n"
+         "\nLABEL -subStrWhileStart\n"
+         "\tMOVE GF@-tempLeft LF@i$1\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight LF@end$0\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tLT GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tJUMPIFNEQ -subStrWhileEnd GF@-temp bool@true\n"
+         "\nLABEL -subStrWhileBody\n"
+         "\tGETCHAR LF@c$2 LF@value$0 LF@i$1\n"
+         "\tCONCAT LF@res$1 LF@res$1 LF@c$2\n"
+         "\tMOVE GF@-tempLeft LF@i$1\n"
+         "\tPUSHS GF@-tempLeft\n"
+         "\n\tMOVE GF@-tempRight int@1\n"
+         "\tPUSHS GF@-tempRight\n"
+         "\n\tPOPS GF@-tempRight\n"
+         "\tPOPS GF@-tempLeft\n"
+         "\n\tADD GF@-temp GF@-tempLeft GF@-tempRight\n"
+         "\tMOVE LF@i$1 GF@-temp\n"
+         "\tJUMP -subStrWhileStart\n"
+         "\nLABEL -subStrWhileEnd\n"
+         "\tPUSHS LF@res$1\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL ord\n"
+         "\tDEFVAR LF@index\n"
+         "\tPOPS LF@index\n"
+         "\tDEFVAR LF@value\n"
+         "\tPOPS LF@value\n"
+         "\tDEFVAR LF@len\n"
+         "\n\tJUMPIFEQ -ordErr LF@value string@\n"
+         "\n\tCREATEFRAME\n"
+         "\tPUSHS LF@value\n"
+         "\tPUSHFRAME\n"
+         "\tCALL strLength\n"
+         "\tPOPFRAME\n"
+         "\tPOPS LF@len\n"
+         "\tCLEARS\n"
+         "\tLT GF@-temp LF@index LF@len\n"
+         "\tJUMPIFEQ -ordErr GF@-temp bool@false\n"
+         "\n\tSTRI2INT GF@-temp LF@value LF@index\n"
+         "\tPUSHS GF@-temp\n"
+         "\tJUMP -ordSkip\n"
+         "\nLABEL -ordErr\n"
+         "\tPUSHS int@-1\n"
+         "\nLABEL -ordSkip\n"
          "\tRETURN\n");
 
-  printf("\n");
+  printf("LABEL chr\n"
+         "\tPOPS GF@-temp\n"
+         "\tINT2CHAR GF@-temp GF@-temp\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
 
   printf("\t# User defined functions\n");
   return IFJ_SUCCESS;
@@ -313,11 +491,11 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     }
 
     if (left->inferred_type.type == TYPE_DOUBLE) {
-      // nejak zkontrolovat ze to neni nula - TODO
-      *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+      *snippet = "\tJUMPIFEQ -error GF@-tempRight float@0.0\n"
+                 "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     } else if (left->inferred_type.type == TYPE_INT) {
-      // nejak zkontrolovat ze to neni nula - TODO
-      *snippet = "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+      *snippet = "\tJUMPIFEQ -error GF@-tempRight int@0\n"
+                 "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     } else {
       err = IFJ_EINTERNAL;
     }
@@ -530,7 +708,7 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
     err = get_snippet(elif->as.else_if_st.expr, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    printf("\tJUMPIFEQ -then%d %s bool@true\n", id, snippet);
     free(snippet);
     break;
 
@@ -538,7 +716,7 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
     err = get_snippet(elif->as.else_if_st.expr, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    printf("\tJUMPIFEQ -then%d %s bool@true\n", id, snippet);
     free(snippet);
     break;
 
@@ -546,7 +724,7 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
     err = calc_expression(elif->as.else_if_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
+    printf("\tJUMPIFEQ -then%d GF@-temp bool@true\n", id);
     break;
 
   case AST_FUNC_CALL:
@@ -554,7 +732,7 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
     CHECK_ERR_RET(err);
 
     printf("\tPOPS GF@-temp\n");
-    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
+    printf("\tJUMPIFEQ -then%d GF@-temp bool@true\n", id);
     break;
 
   default:
@@ -575,14 +753,14 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   static int last_id = 0;
   int id = ++last_id;
 
-  printf("LABEL start%d\n", id); // redundant?
+  printf("LABEL -start%d\n", id); // redundant?
 
   switch (if_st->as.if_st.expr->type) {
   case AST_VAR:
     err = get_snippet(if_st->as.if_st.expr, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    printf("\tJUMPIFEQ -then%d %s bool@true\n", id, snippet);
     free(snippet);
     break;
 
@@ -590,7 +768,7 @@ static IFJ_ERR condition(ast_node_t *if_st) {
     err = get_snippet(if_st->as.if_st.expr, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d %s bool@true\n", id, snippet);
+    printf("\tJUMPIFEQ -then%d %s bool@true\n", id, snippet);
     free(snippet);
     break;
 
@@ -598,7 +776,7 @@ static IFJ_ERR condition(ast_node_t *if_st) {
     err = calc_expression(if_st->as.if_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
+    printf("\tJUMPIFEQ -then%d GF@-temp bool@true\n", id);
     break;
 
   case AST_FUNC_CALL:
@@ -606,7 +784,7 @@ static IFJ_ERR condition(ast_node_t *if_st) {
     CHECK_ERR_RET(err);
 
     printf("\tPOPS GF@-temp\n");
-    printf("\tJUMPIFEQ then%d GF@-temp bool@true\n", id);
+    printf("\tJUMPIFEQ -then%d GF@-temp bool@true\n", id);
     break;
 
   default:
@@ -623,32 +801,34 @@ static IFJ_ERR condition(ast_node_t *if_st) {
                               elif_ids[i]); // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
   }
-  printf("\tJUMP else%d\n", id);
+
+  printf("\tJUMP -%s%d\n", if_st->as.if_st.else_st == NULL ? "end" : "else",
+         id);
 
   // vytvoř else if bloků
   for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
-    printf("LABEL then%d\n", elif_ids[i]);
+    printf("LABEL -then%d\n", elif_ids[i]);
     err =
         generate_body(if_st->as.if_st.else_if[i]
                           ->as.else_if_st.body); // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
 
-    printf("\tJUMP end%d\n", id);
+    printf("\tJUMP -end%d\n", id);
   }
 
   if (if_st->as.if_st.else_st) { // else větev nemusí existovat
-    printf("LABEL else%d\n", id);
+    printf("LABEL -else%d\n", id);
     err = generate_body(if_st->as.if_st.else_st);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMP end%d\n", id);
+    printf("\tJUMP -end%d\n", id);
   }
 
-  printf("\nLABEL then%d\n", id);
+  printf("\nLABEL -then%d\n", id);
   err = generate_body(if_st->as.if_st.body);
   CHECK_ERR_RET(err);
 
-  printf("LABEL end%d\n\n", id);
+  printf("LABEL -end%d\n\n", id);
 
   return IFJ_SUCCESS;
 }
@@ -674,7 +854,6 @@ static IFJ_ERR define_var(ast_node_t *def) {
         printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
         free(snippet);
       } else if (def->as.def.rhs->type == AST_FUNC_CALL) {
-        // TODO
         err = call_func(def->as.def.rhs);
         CHECK_ERR_RET(err);
 
@@ -733,14 +912,14 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
   err = define_local_vars(body);
   CHECK_ERR_RET(err);
 
-  printf("\nLABEL whileStart%d\n", id);
+  printf("\nLABEL -whileStart%d\n", id);
 
   switch (while_st->as.while_st.expr->type) {
   case AST_VAR:
     err = get_snippet(while_st->as.while_st.expr, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFNEQ whileEnd%d %s bool@true\n", id, snippet);
+    printf("\tJUMPIFNEQ -whileEnd%d %s bool@true\n", id, snippet);
     free(snippet);
     break;
 
@@ -748,7 +927,7 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     err = get_snippet(while_st->as.while_st.expr, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFNEQ whileEnd%d %s bool@true\n", id, snippet);
+    printf("\tJUMPIFNEQ -whileEnd%d %s bool@true\n", id, snippet);
     free(snippet);
     break;
 
@@ -756,7 +935,7 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     err = calc_expression(while_st->as.while_st.expr);
     CHECK_ERR_RET(err);
 
-    printf("\tJUMPIFNEQ whileEnd%d GF@-temp bool@true\n", id);
+    printf("\tJUMPIFNEQ -whileEnd%d GF@-temp bool@true\n", id);
     break;
 
   case AST_FUNC_CALL:
@@ -764,7 +943,7 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     CHECK_ERR_RET(err);
 
     printf("\tPOPS GF@-temp\n");
-    printf("\tJUMPIFNEQ whileEnd%d GF@-temp bool@true\n", id);
+    printf("\tJUMPIFNEQ -whileEnd%d GF@-temp bool@true\n", id);
     break;
 
   default:
@@ -772,7 +951,7 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     return IFJ_EINTERNAL;
   }
 
-  printf("\nLABEL whileBody%d\n", id);
+  printf("\nLABEL -whileBody%d\n", id);
 
   // generuje každou instrukci
   for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
@@ -782,9 +961,9 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     CHECK_ERR_RET(err);
   }
 
-  printf("\tJUMP whileStart%d\n", id);
+  printf("\tJUMP -whileStart%d\n", id);
 
-  printf("\nLABEL whileEnd%d\n", id);
+  printf("\nLABEL -whileEnd%d\n", id);
 
   return IFJ_SUCCESS;
 }
@@ -813,7 +992,7 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
       return IFJ_EINTERNAL;
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR(s);
-    n = snprintf(s, (size_t)n + 1, "%.17g", literal->as.literal.double_value);
+    n = snprintf(s, (size_t)n + 1, "%a", literal->as.literal.double_value);
     if (n < 0)
       goto cleanup;
     break;
@@ -949,12 +1128,12 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     return condition(instruction);
 
   case AST_FOR: // 12
+    // return for_loop(instruction);
     printf("\tfor cycle - TODO\n");
     break;
 
   case AST_WHILE: // 16
     return while_loop(instruction);
-    break;
 
   case AST_FUNC_RET: // 17
     printf("\treturn - TODO\n");
@@ -963,9 +1142,6 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   case AST_FUNC_CALL: // 18
     err = call_func(instruction);
     CHECK_ERR_RET(err);
-    // if (instruction->as.func_call)
-    // printf("\tPOPS LF@%s\n", def->as.def.id); - potrebuju flag z ast_func ze
-    // to ma neco vratit
     printf("\tCLEARS\n\n");
     break;
 
