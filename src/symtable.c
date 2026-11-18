@@ -430,7 +430,9 @@ IFJ_ERR symtable_find(const symtable_t *table, const char *key,
 
   err = avl_find(table->root, key, value);
   if (CHECK_ERR(err)) {
-    LOG_ERR(err, "Key not found: %s", key);
+    // IFJ_ESEM_UNDEF je očekávaný výsledek "nenalezeno" (např. při
+    // postupném prohledávání zásobníku bloků) a volající si ho ohlásí
+    // sám, pokud je to skutečná chyba.
     *value = NULL;
     return err;
   }

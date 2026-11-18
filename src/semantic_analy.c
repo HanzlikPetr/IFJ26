@@ -1574,7 +1574,7 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
       IFJ_ERR var_err =
           search_variable_in_stack(ctx, expr_node->as.func_call.id, &var_data);
 
-      if (var_err != IFJ_ESEM_UNDEF && CHECK_ERR(var_err)) {
+      if (CHECK_ERR(var_err)) {
         LOG_ERR(var_err, "Failed to search variable '%s' in local scopes.",
                 expr_node->as.func_call.id);
         return var_err;
