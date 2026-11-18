@@ -886,6 +886,7 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                                             ifj26_type_t *result_type,
                                             char *dot_identifier) {
   CHECK_ARGS_NULL_RET(expr_node, lhs_type, rhs_type, result_type);
+  bool unit_to_string;
 
   if (expr_node->type != AST_EXPR || expr_node->as.expr.is_unary) {
     LOG_ERR(IFJ_EINTERNAL,
@@ -894,7 +895,12 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
     return IFJ_EINTERNAL;
   }
 
-  if (lhs_type->type == TYPE_UNIT || rhs_type->type == TYPE_UNIT) {
+  unit_to_string = expr_node->as.expr.operator_type == TOK_DOT &&
+                   dot_identifier != NULL &&
+                   strcmp(dot_identifier, "toString") == 0;
+
+  if ((lhs_type->type == TYPE_UNIT && !unit_to_string) ||
+      rhs_type->type == TYPE_UNIT) {
     CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Unit type in binary operation.");
   }
 
