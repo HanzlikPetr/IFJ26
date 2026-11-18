@@ -11,8 +11,10 @@
  */
 
 // --- libraries ---
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // --- our files ---
@@ -23,26 +25,24 @@
 typedef struct {
   char **data;
   size_t size;
-} global_ids_t;
+} local_ids_t;
 
-global_ids_t global_ids;
+local_ids_t local_ids;
 
 // ==================== POMOCNÉ FUNKCE ====================
 
-static IFJ_ERR global_ids_ctor(global_ids_t *global_ids) {
+static IFJ_ERR local_ids_ctor(local_ids_t *local_ids) {
   // pole s hlavickou
-  global_ids->data = malloc(sizeof(char *) * 1);
-  CHECK_MEM_ERR(global_ids->data);
+  local_ids->data = malloc(sizeof(char *) * 1);
+  CHECK_MEM_ERR(local_ids->data);
 
-  global_ids->size = 1;
-  global_ids->data[0] = NULL;
+  local_ids->size = 1;
+  local_ids->data[0] = NULL;
 
   return IFJ_SUCCESS;
 }
 
-static void global_ids_dtor(global_ids_t *global_ids) {
-  free(global_ids->data);
-}
+static void local_ids_dtor(local_ids_t *local_ids) { free(local_ids->data); }
 
 static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet);
 static IFJ_ERR call_func(ast_node_t *func_call);
@@ -185,10 +185,18 @@ cleanup:
   return IFJ_EINTERNAL;
 }
 
-static IFJ_ERR get_op(token_type_t type, const char **snippet) {
+static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
+  token_type_t type = expr->as.expr.operator_type;
+  ast_node_t *left = expr->as.expr.binary.lhs;
+  ast_node_t *right = expr->as.expr.binary.rhs;
+  IFJ_ERR err = IFJ_SUCCESS;
 
   switch (type) {
   case TOK_EQ:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
@@ -197,14 +205,46 @@ static IFJ_ERR get_op(token_type_t type, const char **snippet) {
     break;
 
   case TOK_LT:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if (left->inferred_type.type ==
+               TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
+                            // operace EQ
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tLT GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_GT:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if (left->inferred_type.type ==
+               TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
+                            // operace EQ
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tGT GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_LEQ:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if (left->inferred_type.type == TYPE_UNIT) {
+      *snippet =
+          "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
+                                                                          // typ
+                                                                          // nil
+                                                                          // se
+                                                                          // může
+                                                                          // porovnávat
+                                                                          // pouze
+                                                                          // s
+                                                                          // nil
+      break;
+    }
+
     *snippet =
         "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n\tLT "
         "GF@-temp GF@-tempLeft GF@-tempRight\n\tPOPS GF@-tempLeft\n\tOR "
@@ -212,6 +252,22 @@ static IFJ_ERR get_op(token_type_t type, const char **snippet) {
     break;
 
   case TOK_GEQ:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if (left->inferred_type.type == TYPE_UNIT) {
+      *snippet =
+          "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
+                                                                          // typ
+                                                                          // nil
+                                                                          // se
+                                                                          // může
+                                                                          // porovnávat
+                                                                          // pouze
+                                                                          // s
+                                                                          // nil
+      break;
+    }
+
     *snippet =
         "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n\tGT "
         "GF@-temp GF@-tempLeft GF@-tempRight\n\tPOPS GF@-tempLeft\n\tOR "
@@ -219,26 +275,71 @@ static IFJ_ERR get_op(token_type_t type, const char **snippet) {
     break;
 
   case TOK_ADD:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if ((left->inferred_type.type != TYPE_INT) &&
+               (left->inferred_type.type != TYPE_DOUBLE)) {
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_SUB:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if ((left->inferred_type.type != TYPE_INT) &&
+               (left->inferred_type.type != TYPE_DOUBLE)) {
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tSUB GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_MUL:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if ((left->inferred_type.type != TYPE_INT) &&
+               (left->inferred_type.type != TYPE_DOUBLE)) {
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tMUL GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_DIV:
-    *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    }
+
+    if (left->inferred_type.type == TYPE_DOUBLE) {
+      // nejak zkontrolovat ze to neni nula - TODO
+      *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+    } else if (left->inferred_type.type == TYPE_INT) {
+      // nejak zkontrolovat ze to neni nula - TODO
+      *snippet = "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+    } else {
+      err = IFJ_EINTERNAL;
+    }
     break;
 
   case TOK_AND:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if (left->inferred_type.type != TYPE_BOOL) {
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tAND GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_OR:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      err = IFJ_EINTERNAL;
+    } else if (left->inferred_type.type != TYPE_BOOL) {
+      err = IFJ_EINTERNAL;
+    }
+
     *snippet = "\tOR GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
@@ -246,6 +347,9 @@ static IFJ_ERR get_op(token_type_t type, const char **snippet) {
     LOG_ERR(IFJ_EINTERNAL, "Unknown operator type");
     return IFJ_EINTERNAL;
   }
+
+  CHECK_ERR_LOG_RET(err, "Uncompatible operator type");
+
   return IFJ_SUCCESS;
 }
 
@@ -255,7 +359,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
   IFJ_ERR err;
 
   if (expr->as.expr.is_unary) {
-    if (expr->as.expr.operator_type != TOK_NOT) {   // jediný unární operand
+    if (expr->as.expr.operator_type != TOK_NOT) { // jediný unární operand
       return IFJ_EINTERNAL;
     }
 
@@ -326,10 +430,8 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
 
     printf("\tPOPS GF@-tempLeft\n\n");
 
-    err = get_op(expr->as.expr.operator_type, (const char **)&snippet);
+    err = get_op(expr, (const char **)&snippet);
     CHECK_ERR_RET(err);
-
-    // check_op(snippet);   // ošetření podmínek
 
     printf(snippet);
   }
@@ -372,41 +474,6 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
   printf("\tPUSHFRAME\n");
   printf("\tCALL %s\n", func_call->as.func_call.id);
   printf("\tPOPFRAME\n");
-  return IFJ_SUCCESS;
-}
-
-static IFJ_ERR define_var(ast_node_t *def) {
-  CHECK_ARG_NULL_RET(def);
-
-  printf("\tDEFVAR LF@%s\n", def->as.def.id);
-  char *snippet;
-  IFJ_ERR err;
-
-  if (def->as.def.rhs->type == AST_LITERAL) {
-    err = get_snippet(def->as.def.rhs, &snippet);
-    CHECK_ERR_RET(err);
-
-    printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
-    free(snippet);
-  } else if (def->as.def.rhs->type == AST_VAR) {
-    err = get_snippet(def->as.def.rhs, &snippet);
-    CHECK_ERR_RET(err);
-
-    printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
-    free(snippet);
-  } else if (def->as.def.rhs->type == AST_FUNC_CALL) {
-    // TODO
-    err = call_func(def->as.def.rhs);
-    CHECK_ERR_RET(err);
-
-    printf("\tPOPS LF@%s\n", def->as.def.id);
-    printf("\tCLEARS\n\n");
-  } else if (def->as.def.rhs->type == AST_EXPR) {
-    err = calc_expression(def->as.def.rhs);
-    CHECK_ERR_RET(err);
-    printf("\tMOVE LF@%s GF@-temp\n", def->as.def.id);
-  }
-
   return IFJ_SUCCESS;
 }
 
@@ -508,7 +575,7 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   static int last_id = 0;
   int id = ++last_id;
 
-  printf("LABEL start%d\n", id);    // redundant?
+  printf("LABEL start%d\n", id); // redundant?
 
   switch (if_st->as.if_st.expr->type) {
   case AST_VAR:
@@ -553,7 +620,7 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
     elif_ids[i] = ++last_id;
     err = else_condition_expr(if_st->as.if_st.else_if[i],
-                              elif_ids[i]);   // jelikoz to je jiny AST_TYPE
+                              elif_ids[i]); // jelikoz to je jiny AST_TYPE
     CHECK_ERR_RET(err);
   }
   printf("\tJUMP else%d\n", id);
@@ -586,30 +653,69 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR def_loop_var(ast_node_t *def) {
+static IFJ_ERR define_var(ast_node_t *def) {
   CHECK_ARG_NULL_RET(def);
   char *snippet;
   IFJ_ERR err;
 
-  for (size_t i = 1; i < global_ids.size; i++) {
-    if (strcmp(def->as.def.id, global_ids.data[i]) ==
-        0) { // kdyz uz to je definovany, uz to znovu nedefinuju
-      err = get_snippet(def->as.def.rhs, &snippet);
-      CHECK_ERR_RET(err);
-      printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
-      free(snippet);
+  for (size_t i = 1; i < local_ids.size; i++) {
+    if (strcmp(def->as.def.id, local_ids.data[i]) == 0) {
+
+      if (def->as.def.rhs->type == AST_LITERAL) {
+        err = get_snippet(def->as.def.rhs, &snippet);
+        CHECK_ERR_RET(err);
+
+        printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
+        free(snippet);
+      } else if (def->as.def.rhs->type == AST_VAR) {
+        err = get_snippet(def->as.def.rhs, &snippet);
+        CHECK_ERR_RET(err);
+
+        printf("\tMOVE LF@%s %s\n", def->as.def.id, snippet);
+        free(snippet);
+      } else if (def->as.def.rhs->type == AST_FUNC_CALL) {
+        // TODO
+        err = call_func(def->as.def.rhs);
+        CHECK_ERR_RET(err);
+
+        printf("\tPOPS LF@%s\n", def->as.def.id);
+        printf("\tCLEARS\n\n");
+      } else if (def->as.def.rhs->type == AST_EXPR) {
+        err = calc_expression(def->as.def.rhs);
+        CHECK_ERR_RET(err);
+        printf("\tMOVE LF@%s GF@-temp\n", def->as.def.id);
+      }
+
       return IFJ_SUCCESS;
     }
   }
 
   printf("\tDEFVAR LF@%s\n", def->as.def.id);
 
-  char **p = realloc(global_ids.data, (global_ids.size + 1) * sizeof *p);
+  char **p = realloc(local_ids.data, (local_ids.size + 1) * sizeof *p);
   CHECK_MEM_ERR(p);
-  global_ids.data = p;
+  local_ids.data = p;
 
-  global_ids.data[global_ids.size] = def->as.def.id;
-  global_ids.size = global_ids.size + 1;
+  local_ids.data[local_ids.size] = def->as.def.id;
+  local_ids.size = local_ids.size + 1;
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR define_local_vars(ast_node_t *body) {
+  CHECK_ARG_NULL_RET(body);
+  IFJ_ERR err;
+
+  for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
+    ast_node_t *instruction = body->as.block.commands[i];
+
+    if (instruction->type == AST_DEF) {
+      err = define_var(instruction);
+      CHECK_ERR_RET(err);
+    }
+  }
+
+  printf("\n");
 
   return IFJ_SUCCESS;
 }
@@ -623,16 +729,11 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
   ast_node_t *body = while_st->as.while_st.body;
 
   // definování vnořených proměnných cyklů
-  for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
-    ast_node_t *instruction = body->as.block.commands[i];
+  printf("\n\t# Definition of loop variables\n");
+  err = define_local_vars(body);
+  CHECK_ERR_RET(err);
 
-    if (instruction->type == AST_DEF) {
-      err = def_loop_var(instruction);
-      CHECK_ERR_RET(err);
-    }
-  }
-
-  printf("LABEL whileStart%d\n", id);
+  printf("\nLABEL whileStart%d\n", id);
 
   switch (while_st->as.while_st.expr->type) {
   case AST_VAR:
@@ -671,26 +772,19 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     return IFJ_EINTERNAL;
   }
 
-  printf("LABEL whileBody%d\n", id);
+  printf("\nLABEL whileBody%d\n", id);
 
   // generuje každou instrukci
   for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
     ast_node_t *instruction = body->as.block.commands[i];
 
-    if (instruction->type == AST_DEF) {
-      err = def_loop_var(instruction);
-      CHECK_ERR_RET(err);
-    } else if (instruction->type == AST_ASSIGN) {
-      err = assign(instruction); // uz to je inicializovany v globalu
-    } else {
-      err = generate_instruction(instruction);
-      CHECK_ERR_RET(err);
-    }
+    err = generate_instruction(instruction);
+    CHECK_ERR_RET(err);
   }
 
   printf("\tJUMP whileStart%d\n", id);
 
-  printf("LABEL whileEnd%d\n", id);
+  printf("\nLABEL whileEnd%d\n", id);
 
   return IFJ_SUCCESS;
 }
@@ -739,6 +833,16 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
     memcpy(s, literal->as.literal.str_value, len);
     break;
   }
+
+  case TYPE_UNIT:
+    char *text = "nil@nil";
+    size_t len = strlen(text) + 1;
+    s = malloc(len);
+    CHECK_MEM_ERR(s);
+
+    memcpy(s, text, len);
+    break;
+
   default:
     LOG_ERR(IFJ_EINTERNAL, "Unknown literal type");
     return IFJ_EINTERNAL;
@@ -884,6 +988,11 @@ static IFJ_ERR generate_body(ast_node_t *body) {
   ast_node_t *instruction;
   IFJ_ERR err;
 
+  // definování lokálních proměnných
+  printf("\t# Definition of local variables\n");
+  err = define_local_vars(body);
+  CHECK_ERR_RET(err);
+
   // generuje každou instrukci
   for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
     instruction = body->as.block.commands[i];
@@ -907,6 +1016,11 @@ static IFJ_ERR generate_function(ast_node_t *function) {
     CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Passed argument is not a function");
   }
 
+  IFJ_ERR err;
+
+  err = local_ids_ctor(&local_ids);
+  CHECK_ERR_RET(err);
+
   printf("LABEL %s\n", function->as.func.id); // vytvoří návěští funkce
 
   // vytvoří lokální kopie parametrů
@@ -922,13 +1036,20 @@ static IFJ_ERR generate_function(ast_node_t *function) {
   }
   printf("\n");
 
-  IFJ_ERR err = generate_body(function->as.func.body);
-  CHECK_ERR_RET(err);
+  err = generate_body(function->as.func.body);
+  CHECK_ERR_GOTO(err, cleanup);
 
   printf("\tRETURN\n\n"); // az pridam reakci na func_ret tak to mozna bude
                           // redundantni (nebo to tam necham 2x abych to nemusel
                           // kontrolovat jestli to tam uz je) - TODO
+
+  local_ids_dtor(&local_ids);
+
   return IFJ_SUCCESS;
+
+cleanup:
+  local_ids_dtor(&local_ids);
+  return IFJ_EINTERNAL;
 }
 
 static IFJ_ERR generate_funcitons(ast_node_t *root) {
@@ -953,19 +1074,11 @@ IFJ_ERR generate(ast_node_t *root) {
                       "Abstract syntax tree doesn't have a root");
   }
 
-  err = global_ids_ctor(&global_ids);
+  err = start_code(root);
   CHECK_ERR_RET(err);
 
-  err = start_code(root);
-  CHECK_ERR_GOTO(err, cleanup);
-
   err = generate_funcitons(root);
-  CHECK_ERR_GOTO(err, cleanup);
+  CHECK_ERR_RET(err);
 
-  global_ids_dtor(&global_ids);
   return IFJ_SUCCESS;
-
-cleanup:
-  global_ids_dtor(&global_ids);
-  return IFJ_EINTERNAL;
 }
