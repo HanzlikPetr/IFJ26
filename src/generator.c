@@ -4,10 +4,6 @@
  *
  * @author xberanm00 Marek Beran
  */
-/*
- * TODO:
- * vyresit ty returny - podle AST_FUNC_RET - pouze kdyz tam je return
- */
 
 // --- libraries ---
 #include <inttypes.h>
@@ -968,6 +964,31 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
   return IFJ_SUCCESS;
 }
 
+static IFJ_ERR ret_st(ast_node_t *func_ret) {
+  CHECK_ARG_NULL_RET(func_ret);
+  IFJ_ERR err;
+  char *snippet;
+
+  if (func_ret->as.func_ret.rhs) {
+    ast_node_type_t type = func_ret->as.func_ret.rhs->type;
+    if (type == AST_FUNC_CALL) {
+      generate_instruction(func_ret->as.func_ret.rhs);
+    } else if (type == AST_EXPR) {
+      generate_instruction(func_ret->as.func_ret.rhs);
+      printf("\tPUSHS GF@-temp\n");
+    } else {
+      err = get_snippet(func_ret->as.func_ret.rhs, &snippet);
+      CHECK_ERR_RET(err);
+
+      printf("\tPUSHS %s\n", snippet);
+      free(snippet);
+    }
+  }
+
+  printf("\tRETURN\n");
+  return IFJ_SUCCESS;
+}
+
 static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
   CHECK_ARG_NULL_RET(literal);
 
@@ -1099,14 +1120,14 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = calc_expression(instruction);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS GF@-temp\n"); // kvuli dosavadnimu reseni returnu
+    printf("\tPUSHS GF@-temp\n");
     break;
 
   case AST_VAR: // 6
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet); // kvuli dosavadnimu reseni returnu
+    printf("\tPUSHS %s\n", snippet);
     free(snippet);
     break;
 
@@ -1114,7 +1135,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet); // kvuli dosavadnimu reseni returnu
+    printf("\tPUSHS %s\n", snippet);
     free(snippet);
     break;
 
@@ -1136,8 +1157,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     return while_loop(instruction);
 
   case AST_FUNC_RET: // 17
-    printf("\treturn - TODO\n");
-    break;
+    return ret_st(instruction);
 
   case AST_FUNC_CALL: // 18
     err = call_func(instruction);
@@ -1215,9 +1235,7 @@ static IFJ_ERR generate_function(ast_node_t *function) {
   err = generate_body(function->as.func.body);
   CHECK_ERR_GOTO(err, cleanup);
 
-  printf("\tRETURN\n\n"); // az pridam reakci na func_ret tak to mozna bude
-                          // redundantni (nebo to tam necham 2x abych to nemusel
-                          // kontrolovat jestli to tam uz je) - TODO
+  printf("\tRETURN\n\n");
 
   local_ids_dtor(&local_ids);
 
