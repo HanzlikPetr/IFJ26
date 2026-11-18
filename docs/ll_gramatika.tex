@@ -1,0 +1,129 @@
+% LL gramatika a LL tabulka -- prevedeno z gramatika.xlsx (autor gramatiky: Ondrej Glet)
+\subsection{LL gramatika}
+% TODO: kratky uvod -- co znamenaji pseudoterminaly expr a base_type
+{\small
+\begin{longtable}{rlcl}
+1. & \texttt{<prolog>} & $\rightarrow$ & \texttt{import ifj26.* EOL <functions> EOF} \\
+2. & \texttt{<functions>} & $\rightarrow$ & \texttt{<func> <functions>} \\
+3. & \texttt{<functions>} & $\rightarrow$ & $\varepsilon$ \\
+4. & \texttt{<main>} & $\rightarrow$ & \texttt{@main <eol>} \\
+5. & \texttt{<main>} & $\rightarrow$ & $\varepsilon$ \\
+6. & \texttt{<eol>} & $\rightarrow$ & \texttt{EOL} \\
+7. & \texttt{<eol>} & $\rightarrow$ & $\varepsilon$ \\
+8. & \texttt{<type\_id>} & $\rightarrow$ & \texttt{base\_type} \\
+9. & \texttt{<type\_id>} & $\rightarrow$ & \texttt{List [ <type\_id> ]} \\
+10. & \texttt{<opt\_type>} & $\rightarrow$ & \texttt{: <type\_id>} \\
+11. & \texttt{<opt\_type>} & $\rightarrow$ & $\varepsilon$ \\
+12. & \texttt{<func>} & $\rightarrow$ & \texttt{<main> def id <params\_lists> <opt\_type> = <func\_body>} \\
+13. & \texttt{<params\_lists>} & $\rightarrow$ & \texttt{( <params> ) <params\_lists>} \\
+14. & \texttt{<params\_lists>} & $\rightarrow$ & $\varepsilon$ \\
+15. & \texttt{<params>} & $\rightarrow$ & \texttt{<param> <param\_next>} \\
+16. & \texttt{<params>} & $\rightarrow$ & $\varepsilon$ \\
+17. & \texttt{<param>} & $\rightarrow$ & \texttt{id : <type\_id>} \\
+18. & \texttt{<param\_next>} & $\rightarrow$ & \texttt{, <param\_after\_comma>} \\
+19. & \texttt{<param\_next>} & $\rightarrow$ & $\varepsilon$ \\
+20. & \texttt{<param\_after\_comma>} & $\rightarrow$ & \texttt{<param> <param\_next>} \\
+21. & \texttt{<param\_after\_comma>} & $\rightarrow$ & $\varepsilon$ \\
+22. & \texttt{<func\_body>} & $\rightarrow$ & \texttt{<expr> EOL} \\
+23. & \texttt{<func\_body>} & $\rightarrow$ & \texttt{EOL <block>} \\
+24. & \texttt{<block>} & $\rightarrow$ & \texttt{INDENT <block\_cmd> <block\_cmds> DEDENT} \\
+25. & \texttt{<block\_cmds>} & $\rightarrow$ & \texttt{<block\_cmd> <block\_cmds>} \\
+26. & \texttt{<block\_cmds>} & $\rightarrow$ & $\varepsilon$ \\
+27. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<var\_def>} \\
+28. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<val\_def>} \\
+29. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<func\_ret>} \\
+30. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<if\_st>} \\
+31. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<while\_st>} \\
+32. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<for\_st>} \\
+33. & \texttt{<block\_cmd>} & $\rightarrow$ & \texttt{<assign\_or\_expr> EOL} \\
+34. & \texttt{<var\_def>} & $\rightarrow$ & \texttt{var id <opt\_type> = <expr> EOL} \\
+35. & \texttt{<val\_def>} & $\rightarrow$ & \texttt{val id <opt\_type> = <expr> EOL} \\
+36. & \texttt{<func\_ret>} & $\rightarrow$ & \texttt{return <func\_ret\_opt> EOL} \\
+37. & \texttt{<func\_ret\_opt>} & $\rightarrow$ & \texttt{<expr>} \\
+38. & \texttt{<func\_ret\_opt>} & $\rightarrow$ & $\varepsilon$ \\
+39. & \texttt{<assign\_or\_expr>} & $\rightarrow$ & \texttt{id = <expr>} \\
+40. & \texttt{<assign\_or\_expr>} & $\rightarrow$ & \texttt{<expr>} \\
+41. & \texttt{<while\_st>} & $\rightarrow$ & \texttt{while <expr> do EOL <block>} \\
+42. & \texttt{<if\_st>} & $\rightarrow$ & \texttt{if <expr> then <if\_then\_body>} \\
+43. & \texttt{<if\_then\_body>} & $\rightarrow$ & \texttt{EOL <block> <else\_st>} \\
+44. & \texttt{<if\_then\_body>} & $\rightarrow$ & \texttt{<inline\_cmd> <inline\_else\_or\_eol>} \\
+45. & \texttt{<inline\_else\_or\_eol>} & $\rightarrow$ & \texttt{else <else\_after>} \\
+46. & \texttt{<inline\_else\_or\_eol>} & $\rightarrow$ & \texttt{EOL} \\
+47. & \texttt{<if\_body>} & $\rightarrow$ & \texttt{EOL <block>} \\
+48. & \texttt{<if\_body>} & $\rightarrow$ & \texttt{<inline\_cmd> EOL} \\
+49. & \texttt{<inline\_cmd>} & $\rightarrow$ & \texttt{return <func\_ret\_opt>} \\
+50. & \texttt{<inline\_cmd>} & $\rightarrow$ & \texttt{<assign\_or\_expr>} \\
+51. & \texttt{<inline\_cmd>} & $\rightarrow$ & \texttt{if <expr> then <inline\_cmd> <else\_inline\_opt>} \\
+52. & \texttt{<else\_st>} & $\rightarrow$ & \texttt{else <else\_after>} \\
+53. & \texttt{<else\_st>} & $\rightarrow$ & $\varepsilon$ \\
+54. & \texttt{<else\_after>} & $\rightarrow$ & \texttt{if <expr> then <if\_then\_body>} \\
+55. & \texttt{<else\_after>} & $\rightarrow$ & \texttt{EOL <block>} \\
+56. & \texttt{<else\_after>} & $\rightarrow$ & \texttt{return <func\_ret\_opt> EOL} \\
+57. & \texttt{<else\_after>} & $\rightarrow$ & \texttt{<assign\_or\_expr> EOL} \\
+58. & \texttt{<else\_inline\_opt>} & $\rightarrow$ & \texttt{else <inline\_cmd>} \\
+59. & \texttt{<else\_inline\_opt>} & $\rightarrow$ & $\varepsilon$ \\
+60. & \texttt{<for\_st>} & $\rightarrow$ & \texttt{for <for\_head> do <if\_body>} \\
+61. & \texttt{<for\_head>} & $\rightarrow$ & \texttt{EOL INDENT <gen> EOL <guards\_eol> DEDENT} \\
+62. & \texttt{<for\_head>} & $\rightarrow$ & \texttt{<gen> <guards>} \\
+63. & \texttt{<gen>} & $\rightarrow$ & \texttt{id <- <expr> <range\_opt>} \\
+64. & \texttt{<range\_opt>} & $\rightarrow$ & \texttt{to <expr> <by\_opt>} \\
+65. & \texttt{<range\_opt>} & $\rightarrow$ & \texttt{until <expr>} \\
+66. & \texttt{<range\_opt>} & $\rightarrow$ & $\varepsilon$ \\
+67. & \texttt{<by\_opt>} & $\rightarrow$ & \texttt{by <expr>} \\
+68. & \texttt{<by\_opt>} & $\rightarrow$ & $\varepsilon$ \\
+69. & \texttt{<guards\_eol>} & $\rightarrow$ & \texttt{if <expr> EOL <guards\_eol>} \\
+70. & \texttt{<guards\_eol>} & $\rightarrow$ & $\varepsilon$ \\
+71. & \texttt{<guards>} & $\rightarrow$ & \texttt{if <expr> <guards>} \\
+72. & \texttt{<guards>} & $\rightarrow$ & $\varepsilon$ \\
+\end{longtable}}
+
+
+\subsection{LL tabulka}
+% TODO: vysvetlit konflikty 39/40 a 58/59
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{|l|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|}
+\hline
+ & \rotatebox{90}{\texttt{import}} & \rotatebox{90}{\texttt{EOF}} & \rotatebox{90}{\texttt{@main}} & \rotatebox{90}{\texttt{EOL}} & \rotatebox{90}{\texttt{INDENT}} & \rotatebox{90}{\texttt{DEDENT}} & \rotatebox{90}{\texttt{base\_type}} & \rotatebox{90}{\texttt{List}} & \rotatebox{90}{\texttt{:}} & \rotatebox{90}{\texttt{def}} & \rotatebox{90}{\texttt{(}} & \rotatebox{90}{\texttt{)}} & \rotatebox{90}{\texttt{,}} & \rotatebox{90}{\texttt{=}} & \rotatebox{90}{\texttt{var}} & \rotatebox{90}{\texttt{val}} & \rotatebox{90}{\texttt{return}} & \rotatebox{90}{\texttt{if}} & \rotatebox{90}{\texttt{else}} & \rotatebox{90}{\texttt{while}} & \rotatebox{90}{\texttt{do}} & \rotatebox{90}{\texttt{for}} & \rotatebox{90}{\texttt{to}} & \rotatebox{90}{\texttt{until}} & \rotatebox{90}{\texttt{by}} & \rotatebox{90}{\texttt{id}} & \rotatebox{90}{\texttt{expr}} \\ \hline
+\texttt{<prolog>} & 1 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<functions>} &  & 3 & 2 &  &  &  &  &  &  & 2 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<main>} &  &  & 4 &  &  &  &  &  &  & 5 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<eol>} &  &  &  & 6 &  &  &  &  &  & 7 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<type\_id>} &  &  &  &  &  &  & 8 & 9 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<opt\_type>} &  &  &  &  &  &  &  &  & 10 &  &  &  &  & 11 &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<func>} &  &  & 12 &  &  &  &  &  &  & 12 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<params\_lists>} &  &  &  &  &  &  &  &  & 14 &  & 13 &  &  & 14 &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<params>} &  &  &  &  &  &  &  &  &  &  &  & 16 &  &  &  &  &  &  &  &  &  &  &  &  &  & 15 &  \\ \hline
+\texttt{<param>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 17 &  \\ \hline
+\texttt{<param\_next>} &  &  &  &  &  &  &  &  &  &  &  & 19 & 18 &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<param\_after\_comma>} &  &  &  &  &  &  &  &  &  &  &  & 21 &  &  &  &  &  &  &  &  &  &  &  &  &  & 20 &  \\ \hline
+\texttt{<func\_body>} &  &  &  & 23 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 22 & 22 \\ \hline
+\texttt{<block>} &  &  &  &  & 24 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<block\_cmds>} &  &  &  &  &  & 26 &  &  &  &  &  &  &  &  & 25 & 25 & 25 & 25 &  & 25 &  & 25 &  &  &  & 25 & 25 \\ \hline
+\texttt{<block\_cmd>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 27 & 28 & 29 & 30 &  & 31 &  & 32 &  &  &  & 33 & 33 \\ \hline
+\texttt{<var\_def>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 34 &  &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<val\_def>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 35 &  &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<func\_ret>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 36 &  &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<func\_ret\_opt>} &  &  &  & 38 &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 38 &  &  &  &  &  &  & 37 & 37 \\ \hline
+\texttt{<assign\_or\_expr>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & \textbf{39/40} & 40 \\ \hline
+\texttt{<while\_st>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 41 &  &  &  &  &  &  &  \\ \hline
+\texttt{<if\_st>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 42 &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<if\_then\_body>} &  &  &  & 43 &  &  &  &  &  &  &  &  &  &  &  &  & 44 & 44 &  &  &  &  &  &  &  & 44 & 44 \\ \hline
+\texttt{<inline\_else\_or\_eol>} &  &  &  & 46 &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 45 &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<if\_body>} &  &  &  & 47 &  &  &  &  &  &  &  &  &  &  &  &  & 48 & 48 &  &  &  &  &  &  &  & 48 & 48 \\ \hline
+\texttt{<inline\_cmd>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 49 & 51 &  &  &  &  &  &  &  & 50 & 50 \\ \hline
+\texttt{<else\_st>} &  &  &  &  &  & 53 &  &  &  &  &  &  &  &  & 53 & 53 & 53 & 53 & 52 & 53 &  & 53 &  &  &  & 53 & 53 \\ \hline
+\texttt{<else\_after>} &  &  &  & 55 &  &  &  &  &  &  &  &  &  &  &  &  & 56 & 54 &  &  &  &  &  &  &  & 57 & 57 \\ \hline
+\texttt{<else\_inline\_opt>} &  &  &  & 59 &  &  &  &  &  &  &  &  &  &  &  &  &  &  & \textbf{58/59} &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<for\_st>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 60 &  &  &  &  &  \\ \hline
+\texttt{<for\_head>} &  &  &  & 61 &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 62 &  \\ \hline
+\texttt{<gen>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 63 &  \\ \hline
+\texttt{<range\_opt>} &  &  &  & 66 &  &  &  &  &  &  &  &  &  &  &  &  &  & 66 &  &  & 66 &  & 64 & 65 &  &  &  \\ \hline
+\texttt{<by\_opt>} &  &  &  & 68 &  &  &  &  &  &  &  &  &  &  &  &  &  & 68 &  &  & 68 &  &  &  & 67 &  &  \\ \hline
+\texttt{<guards\_eol>} &  &  &  &  &  & 70 &  &  &  &  &  &  &  &  &  &  &  & 69 &  &  &  &  &  &  &  &  &  \\ \hline
+\texttt{<guards>} &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  &  & 71 &  &  & 72 &  &  &  &  &  &  \\ \hline
+\end{tabular}
+\end{center}
+

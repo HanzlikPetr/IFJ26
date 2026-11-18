@@ -5,6 +5,8 @@
 \usepackage{hyperref}
 \hypersetup{hidelinks}
 \usepackage{float}
+\usepackage{longtable}
+\usepackage{pdflscape}
 
 \begin{document}
 
@@ -53,10 +55,10 @@ Marek Beran & (xberanm00) & 282821 & 25\,\% \\
   \item \textbf{Petr Hanzlík} -- \texttt{Makefile} a CI, implementace
         výškově vyváženého stromu, tabulka symbolů, sémantická analýza,
         prezentace, PSA
-  \item \textbf{Vojtěch Jurok} -- lexikální analýza, dynamické struktury,
-        systémové testy, diagram konečného automatu, dokumentace
+  \item \textbf{Vojtěch Jurok} -- lexikální analýza,
+        systémové testy (chybové stavy a jednoduché správné programy), diagram konečného automatu, dokumentace
   \item \textbf{Ondřej Glet} -- LL gramatika a LL tabulka, syntaktická analýza,
-        implementace AST, systémové testy
+        implementace AST, systémové testy (složitější algoritmy)
   \item \textbf{Marek Beran} -- implementace zásobníku, blokové schéma
         architektury, generátor cílového kódu
 \end{itemize}
@@ -120,7 +122,7 @@ a~\ref{fig:ka2}, odchylky od standardního modelu jsou popsány pod nimi.
 \textbf{Odchylky od standardního konečného automatu:}
     \begin{itemize}
         \item Znak nepatřící do tokenu se přes \texttt{ungetc} vrací pro další cyklus (stav \texttt{START}).
-        \item \texttt{ID}: lexém se porovná s tabulkou klíčových slov (shoda → \texttt{KEYWORD})
+        \item \texttt{ID}: lexém se porovná s tabulkou klíčových slov (shoda → \texttt{KEYWORD}).
         \item Úroveň mezer na začátku řádku porovnáváme se zásobníkem a generujeme příslušné tokeny \texttt{INDENT/DEDENT}.
         \item Token \texttt{EOL} se v závorkách a na prázdných řádcích nevydává.
       Na konci souboru se vydá \texttt{EOL}, všechny zbývající
@@ -130,8 +132,20 @@ a~\ref{fig:ka2}, odchylky od standardního modelu jsou popsány pod nimi.
       chová se pro zbytek překladače jako konec řádku, jinak jako mezera.
         \item Každý token si pamatuje, jestli mu předcházelo odřádkování, a to i uvnitř závorek, kde se \texttt{EOL} nevydává. Parser to potřebuje vědět, aby mohl správně povolit koncovou čárku před uzavírací závorkou.
         \item Funkce \texttt{scanner\_peek\_next\_token} umožňuje parseru podívat se na další token, aniž by ho rovnou spotřeboval.
+        \item Funkce \texttt{scanner\_unread\_token} umožňuje vrátit token zpět do scanneru, který ho pak vydá při dalším volání \texttt{scanner\_next\_token}. Využívá ji PSA u víceřádkového if výrazu, kde za blokovou větví else vloží umělý \texttt{EOL} a skutečný token vrátí zpět.
     \end{itemize}
 \section{Syntaktická analýza}
+Parser funguje metodou rekurzivního sestupu a staví AST. Zpracování výrazů
+(\texttt{expr}) sám neřeší a předává je precedenční analýze.
+\texttt{base\_type} označuje kterýkoli ze základních typů. Konflikty
+v~LL tabulce řešíme tak, že u~identifikátoru (pravidla 39/40) se pomocí
+\texttt{scanner\_peek\_next\_token} podíváme o~token dopředu, zda následuje
+rovnítko, a~\texttt{else} (pravidla 58/59) přiřadíme k~nejbližšímu \texttt{if}.
+
+\input{ll_gramatika}
+
+
+
 \newpage
 \section{Popis modulů}
 
@@ -195,9 +209,9 @@ Všechny tyto části jsou v kódu označeny komentářem včetně promptu.
 \begin{tabular}{lll}
 \textbf{Soubor} & \textbf{Nástroj} & \textbf{Část} \\
 \hline
-\texttt{parser.c}, \texttt{psa.c} & OpenCode & \texttt{if} výraz (CONTROL) \\
+\texttt{parser.c}, \texttt{psa.c} & GLM-5.3 (OpenCode) & \texttt{if} výraz (CONTROL) \\
 \texttt{semantic\_analy.c} & GLM-5.3 (OpenCode) & kontroly LISTS, detekce rekurze \\
-\texttt{printer\_tree.c} & Gemini, GLM-5.3 & ladicí výpis AST \\
+\texttt{printer\_tree.c} & Gemini 3.1 Pro, GLM-5.3 & ladicí výpis AST \\
 \texttt{error.h} & Gemini 3.1 Pro & makro \texttt{CHECK\_ARGS\_NULL\_RET} \\
 \texttt{symtable.c} & GLM-5.3 (OpenCode) & přesun \texttt{ifj26\_type2str} \\
 \texttt{scanner.c} & Claude Opus 5.5 & převod stavu do struktury \texttt{scanner\_t} \\
