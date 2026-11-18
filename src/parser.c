@@ -3,22 +3,22 @@
  * @brief IFJ26 - Implementace rekurzivního syntaktického analyzátoru
  *
  * @author xgleton00 Ondřej Glet
+ * @author xhanzlp00 Petr Hanzlík
  *
- * Podporu if výrazu vygeneroval AI asistent (agent OpenCode) podle
- * tohoto zadání: když token je klíčové slovo if, vytvoř uzel AST_IF;
- * za if musí být podmínka zpracovaná process_expression, poté
- * klíčové slovo then, za ním větev then opět process_expression,
- * dále povinné else s větví else. Výsledkem je neterminál E na
- * zásobníku PSA, takže if výraz může být operandem libovolného
- * výrazu. Duplicitní logika z parser.c byla odstraněna, parser.c
+ * Podporu if výrazu vygeneroval AI asistent (agent OpenCode, model: GLM-5.3)
+ * podle tohoto zadání: "když token je klíčové slovo if, vytvoř uzel AST_IF; za
+ * if musí být podmínka zpracovaná process_expression, poté klíčové slovo then,
+ * za ním větev then opět process_expression, dále povinné else s větví else.
+ * Výsledkem je neterminál E na zásobníku PSA, takže if výraz může být operandem
+ * libovolného výrazu". Duplicitní logika z parser.c byla odstraněna, parser.c
  * nyní na PSA deleguje (uzel AST_IF vzniká v obou souborech - viz
  * poznámka v parser.c a smlouva v psa.h).
  *
  * Podporu blokových těl větší if výrazu (rozšíření CONTROL, varianty
  * s těly větví na dalších řádcích s odsazením) také vygeneroval AI
- * asistent (agent OpenCode) podle tohoto zadání: tělo větve zapsané
- * na dalším řádku s odsazením se zpracuje jako blok příkazů funkcí
- * parse_block. Protože blok větve else spotřebuje i EOL posledního
+ * asistent (agent OpenCode, model: GLM-5.3) podle tohoto zadání: "tělo větve
+ * zapsané na dalším řádku s odsazením se zpracuje jako blok příkazů funkcí
+ * parse_block". Protože blok větve else spotřebuje i EOL posledního
  * řádku a DEDENT, vkládá se za něj syntetický EOL a skutečný token
  * za ním se vrací do scanneru novou funkcí scanner_unread_token
  * (podrobnosti viz parse_if_expr_push_eol).
