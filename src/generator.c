@@ -104,7 +104,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tJUMPIFEQ -toStrEnd LF@type string@string\n"
          "\tJUMPIFEQ -toStrInt LF@type string@int\n"
          "\tJUMPIFEQ -toStrFloat LF@type string@float\n"
-         "\tJUMPIFEQ -error LF@type string@nil\n" // tohle by mel byt asi error?
+         "\tJUMPIFEQ -toStrNil LF@type string@nil\n"
          // je to bool
          "\tJUMPIFEQ -toStrTrue GF@-temp bool@true\n"
 
@@ -113,6 +113,10 @@ static IFJ_ERR start_code(ast_node_t *root) {
 
          "\nLABEL -toStrTrue\n"
          "\tMOVE GF@-temp string@true\n"
+         "\tJUMP -toStrEnd\n"
+
+         "\nLABEL -toStrNil\n"
+         "\tMOVE GF@-temp string@()\n"
          "\tJUMP -toStrEnd\n"
 
          "\nLABEL -toStrInt\n"
@@ -245,6 +249,8 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS LF@len\n"
          "\tLT GF@-temp LF@index LF@len\n"
          "\tJUMPIFEQ -ordErr GF@-temp bool@false\n"
+         "\tLT GF@-temp LF@index int@0\n"
+         "\tJUMPIFEQ -ordErr GF@-temp bool@true\n"
          "\n\tSTRI2INT GF@-temp LF@value LF@index\n"
          "\tPUSHS GF@-temp\n"
          "\tJUMP -ordSkip\n"
