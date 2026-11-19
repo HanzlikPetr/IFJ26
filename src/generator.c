@@ -156,7 +156,6 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tCALL strLength\n"
          "\tPOPFRAME\n"
          "\tPOPS LF@len$1\n"
-         "\tCLEARS\n"
          "\nLABEL -subStrConditions\n"
          "\tMOVE GF@-tempLeft LF@start$0\n"
          "\tPUSHS GF@-tempLeft\n"
@@ -244,7 +243,6 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tCALL strLength\n"
          "\tPOPFRAME\n"
          "\tPOPS LF@len\n"
-         "\tCLEARS\n"
          "\tLT GF@-temp LF@index LF@len\n"
          "\tJUMPIFEQ -ordErr GF@-temp bool@false\n"
          "\n\tSTRI2INT GF@-temp LF@value LF@index\n"
@@ -450,17 +448,52 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_ADD:
     if (left->inferred_type.type != right->inferred_type.type) {
+      if ((left->inferred_type.type >= TYPE_STRING) !=
+          (right->inferred_type.type >= TYPE_STRING)) {     // logický XOR
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+      
+    }
+    switch (left->inferred_type.type)
+    {
+    case TYPE_INT:
+      *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
+      break;
+
+    case TYPE_DOUBLE:
+      *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
+      break;
+
+    case TYPE_STRING:
+      *snippet = "\tCONCAT GF@-temp GF@-tempLeft GF@-tempRight\n";
+      break;
+    
+    default:
       err = IFJ_EINTERNAL;
-    } else if ((left->inferred_type.type != TYPE_INT) &&
-               (left->inferred_type.type != TYPE_DOUBLE)) {
-      err = IFJ_EINTERNAL;
+      break;
     }
 
-    *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_SUB:
     if (left->inferred_type.type != right->inferred_type.type) {
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
       err = IFJ_EINTERNAL;
     } else if ((left->inferred_type.type != TYPE_INT) &&
                (left->inferred_type.type != TYPE_DOUBLE)) {
@@ -472,6 +505,16 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_MUL:
     if (left->inferred_type.type != right->inferred_type.type) {
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+      
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
       err = IFJ_EINTERNAL;
     } else if ((left->inferred_type.type != TYPE_INT) &&
                (left->inferred_type.type != TYPE_DOUBLE)) {
@@ -483,15 +526,26 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_DIV:
     if (left->inferred_type.type != right->inferred_type.type) {
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+      
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+      err = IFJ_EINTERNAL;
+    } else if ((left->inferred_type.type != TYPE_INT) &&
+               (left->inferred_type.type != TYPE_DOUBLE)) {
       err = IFJ_EINTERNAL;
     }
 
     if (left->inferred_type.type == TYPE_DOUBLE) {
-      *snippet = "\tJUMPIFEQ -error GF@-tempRight float@0.0\n"
-                 "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+      *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     } else if (left->inferred_type.type == TYPE_INT) {
-      *snippet = "\tJUMPIFEQ -error GF@-tempRight int@0\n"
-                 "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
+      *snippet = "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     } else {
       err = IFJ_EINTERNAL;
     }
@@ -854,7 +908,6 @@ static IFJ_ERR define_var(ast_node_t *def) {
         CHECK_ERR_RET(err);
 
         printf("\tPOPS LF@%s\n", def->as.def.id);
-        printf("\tCLEARS\n\n");
       } else if (def->as.def.rhs->type == AST_EXPR) {
         err = calc_expression(def->as.def.rhs);
         CHECK_ERR_RET(err);
@@ -1150,7 +1203,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
 
   case AST_FOR: // 12
     // return for_loop(instruction);
-    printf("\tfor cycle - TODO\n");
+    //printf("\tfor cycle - TODO\n");
     break;
 
   case AST_WHILE: // 16
@@ -1162,11 +1215,10 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   case AST_FUNC_CALL: // 18
     err = call_func(instruction);
     CHECK_ERR_RET(err);
-    printf("\tCLEARS\n\n");
+    //printf("\tCLEARS\n\n");
     break;
 
   default:
-    printf("\tINSTRUCTION: %d\n", instruction->type);
     LOG_ERR(IFJ_EINTERNAL, "Unknown instruction given");
     return IFJ_EINTERNAL;
   }
