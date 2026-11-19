@@ -1827,7 +1827,7 @@ static void test_check_list_methods_errors(void **state) {
                                   call("foo", args(lit_int(1), END), END))),
                        END)),
                    END),
-           IFJ_SUCCESS, IFJ_ESEM_UNDEF);
+           IFJ_SUCCESS, IFJ_ESEM_ARGS);
   reset_state(s);
 
   // Metoda volaná na konstruktoru List
@@ -1889,7 +1889,7 @@ static void test_check_list_methods_errors(void **state) {
                                   call("head", args(lit_int(1), END), END))),
                        END)),
                    END),
-           IFJ_SUCCESS, IFJ_ESEM_UNDEF);
+           IFJ_SUCCESS, IFJ_ESEM_ARGS);
   reset_state(s);
 
   // head na ne-seznamu
