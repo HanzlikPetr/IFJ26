@@ -455,7 +455,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
   case TOK_ADD:
     if (left->inferred_type.type != right->inferred_type.type) {
       if ((left->inferred_type.type >= TYPE_STRING) !=
-          (right->inferred_type.type >= TYPE_STRING)) {     // logický XOR
+          (right->inferred_type.type >= TYPE_STRING)) { // logický XOR
         err = IFJ_EINTERNAL;
         break;
       }
@@ -465,10 +465,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       } else {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
-      
     }
-    switch (left->inferred_type.type)
-    {
+    switch (left->inferred_type.type) {
     case TYPE_INT:
       *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
       break;
@@ -480,7 +478,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     case TYPE_STRING:
       *snippet = "\tCONCAT GF@-temp GF@-tempLeft GF@-tempRight\n";
       break;
-    
+
     default:
       err = IFJ_EINTERNAL;
       break;
@@ -515,7 +513,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
         err = IFJ_EINTERNAL;
         break;
       }
-      
+
       if (left->inferred_type.type == TYPE_INT) {
         printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
       } else {
@@ -536,7 +534,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
         err = IFJ_EINTERNAL;
         break;
       }
-      
+
       if (left->inferred_type.type == TYPE_INT) {
         printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
       } else {
@@ -1209,7 +1207,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
 
   case AST_FOR: // 12
     // return for_loop(instruction);
-    //printf("\tfor cycle - TODO\n");
+    // printf("\tfor cycle - TODO\n");
     break;
 
   case AST_WHILE: // 16
@@ -1221,7 +1219,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   case AST_FUNC_CALL: // 18
     err = call_func(instruction);
     CHECK_ERR_RET(err);
-    //printf("\tCLEARS\n\n");
+    // printf("\tCLEARS\n\n");
     break;
 
   default:
