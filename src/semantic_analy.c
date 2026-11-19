@@ -1301,7 +1301,7 @@ static IFJ_ERR check_list_method_call(sem_ctx_t *ctx, ast_node_t *expr_node,
     bool is_slice = strcmp(method_id, "slice") == 0;
 
     if (!is_drop_take && !is_slice) {
-      CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF,
+      CHECK_ERR_LOG_RET(IFJ_ESEM_ARGS,
                         "Unknown method '%s' called with parameters via dot "
                         "operator.",
                         method_id);
