@@ -372,20 +372,53 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
   switch (type) {
   case TOK_EQ:
     if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
     }
 
     *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n";
     break;
 
   case TOK_NEQ:
+    if (left->inferred_type.type != right->inferred_type.type) {
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+    }
+
     *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tNOT GF@-temp\n";
     break;
 
   case TOK_LT:
     if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
-    } else if (left->inferred_type.type ==
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+    }
+
+    if (left->inferred_type.type ==
                TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
                             // operace EQ
       err = IFJ_EINTERNAL;
@@ -396,8 +429,19 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_GT:
     if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
-    } else if (left->inferred_type.type ==
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+    }
+
+    if (left->inferred_type.type ==
                TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
                             // operace EQ
       err = IFJ_EINTERNAL;
@@ -408,8 +452,19 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_LEQ:
     if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
-    } else if (left->inferred_type.type == TYPE_UNIT) {
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+    }
+
+    if (left->inferred_type.type == TYPE_UNIT) {
       *snippet =
           "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
                                                                           // typ
@@ -431,8 +486,19 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_GEQ:
     if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
-    } else if (left->inferred_type.type == TYPE_UNIT) {
+      if (left->inferred_type.type + right->inferred_type.type > 1) {
+        err = IFJ_EINTERNAL;
+        break;
+      }
+
+      if (left->inferred_type.type == TYPE_INT) {
+        printf("\tINT2FLOAT GF@-tempLeft GF@-tempLeft\n");
+      } else {
+        printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
+      }
+    }
+
+    if (left->inferred_type.type == TYPE_UNIT) {
       *snippet =
           "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
                                                                           // typ
