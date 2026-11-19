@@ -498,7 +498,6 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       } else {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
-      err = IFJ_EINTERNAL;
     } else if ((left->inferred_type.type != TYPE_INT) &&
                (left->inferred_type.type != TYPE_DOUBLE)) {
       err = IFJ_EINTERNAL;
@@ -519,7 +518,6 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       } else {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
-      err = IFJ_EINTERNAL;
     } else if ((left->inferred_type.type != TYPE_INT) &&
                (left->inferred_type.type != TYPE_DOUBLE)) {
       err = IFJ_EINTERNAL;
@@ -540,7 +538,6 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       } else {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
-      err = IFJ_EINTERNAL;
     } else if ((left->inferred_type.type != TYPE_INT) &&
                (left->inferred_type.type != TYPE_DOUBLE)) {
       err = IFJ_EINTERNAL;
