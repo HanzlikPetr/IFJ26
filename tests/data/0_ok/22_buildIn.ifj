@@ -1,0 +1,97 @@
+import ifj26.*
+
+@main def runFoo(): Unit =
+  var integer = 5
+  var double = 0.5
+  var string = "Hello world"
+  val unit = ()
+  val true1 = true
+  val false1 = false
+
+  // print konstatnt
+  print("--------PRINT--------\n")
+  print(integer)
+  print("\n")
+  print(double)
+  print("\n")
+  print(string)
+  print("\n")
+  print(unit)
+  print("\n")
+  print(true1)
+  print("\n")
+  print(false1)
+  print("\n")
+
+  // read input
+  print("--------READLINE--------\n")
+  string = readLine()
+  print(string)
+  print(readLine())
+
+  print("--------READINT--------\n")
+  integer = readInt()
+  print("HODNOTA INTEGER: ")
+  print(integer)
+  print("\n")
+  print(readInt())
+  print("\n")
+
+  print("--------READDOUBLE--------\n")
+  double = readDouble()
+  print("HODNOTA DOUBLE: ")
+  print(double)
+  print("\n")
+  print(readDouble())
+  print("\n")
+
+  // toStr
+  print("--------TOSTR--------\n")
+  string = toStr(double)
+  print(string)
+  print("\n")
+  print(toStr(integer))
+  print("\n")
+  string = toStr(unit)
+  print(string)
+  print("\n")
+
+  // toInt
+  print("--------TOINT--------\n")
+  integer = toInt(double)
+  print(integer)
+  print("\n")
+  print(toInt(1.345345))
+  print("\n")
+
+  // strLength
+  print("--------STRLENGTH--------\n")
+  integer = strLength("ahoj")
+  print(integer)
+  print("\n")
+
+  // subStr
+  print("--------SUBSTR--------\n")
+  string = subStr("ahoj", 1, 3)
+  print(string)
+  print("\n")
+
+  // ord
+  print("--------ORD--------\n")
+  integer = ord("ahoj", 0)
+  print(integer)
+  print("\n") 
+  integer = ord("", 0)
+  print(integer)
+  print("\n")
+  integer = ord("aoj", 10)
+  print(integer)
+  print("\n")
+
+  // chr
+  print("--------CHR--------\n")
+  string = chr(97)
+  print(string)
+  print("\n")
+  print(chr(98))
+  print("\n")
