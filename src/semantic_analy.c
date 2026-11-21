@@ -1764,6 +1764,12 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
           }
 
           *result_type = func_data->func.return_type;
+        } else if (func_err == IFJ_SUCCESS && func_data->is_function) {
+          CHECK_ERR_LOG_RET(
+              IFJ_ESEM_ARGS,
+              "Function '%s' called with incorrect number of paramlists. "
+              "Expected %ld, got 0.",
+              expr_node->as.var.id, func_data->func.param_list_count);
         } else {
           LOG_ERR(IFJ_ESEM_UNDEF,
                   "Variable or parameterless function '%s' not found in "
