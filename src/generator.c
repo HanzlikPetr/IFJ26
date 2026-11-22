@@ -309,51 +309,62 @@ static IFJ_ERR format(char **snippet, data_type_t type) {
 
     n = snprintf(NULL, 0, "string@%s", *snippet);
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
 
     s = malloc((size_t)n + 1);
+    CHECK_MEM_ERR_GOTO(s, cleanup);
     n = snprintf(s, (size_t)n + 1, "string@%s", *snippet);
+
+    if (n < 0)
+      goto cleanup;
+
     free(*snippet);
     *snippet = s;
 
   } else if (type == TYPE_INT) {
     n = snprintf(NULL, 0, "int@%s", *snippet);
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
 
     s = malloc((size_t)n + 1);
+    CHECK_MEM_ERR_GOTO(s, cleanup);
     n = snprintf(s, (size_t)n + 1, "int@%s", *snippet);
-    free(*snippet);
-    *snippet = s;
 
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
+
+    free(*snippet);
+    *snippet = s;
 
   } else if (type == TYPE_DOUBLE) {
     n = snprintf(NULL, 0, "float@%s", *snippet);
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
 
     s = malloc((size_t)n + 1);
+    CHECK_MEM_ERR_GOTO(s, cleanup);
     n = snprintf(s, (size_t)n + 1, "float@%s", *snippet);
-    free(*snippet);
-    *snippet = s;
 
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
+
+    free(*snippet);
+    *snippet = s;
 
   } else if (type == TYPE_BOOL) {
     n = snprintf(NULL, 0, "bool@%s", *snippet);
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
 
     s = malloc((size_t)n + 1);
+    CHECK_MEM_ERR_GOTO(s, cleanup);
     n = snprintf(s, (size_t)n + 1, "bool@%s", *snippet);
-    free(*snippet);
-    *snippet = s;
 
     if (n < 0)
-      return IFJ_EINTERNAL;
+      goto cleanup;
+
+    free(*snippet);
+    *snippet = s;
   }
 
   return IFJ_SUCCESS;
@@ -410,16 +421,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     if (left->inferred_type.type != right->inferred_type.type) {
       err = IFJ_EINTERNAL;
     } else if (left->inferred_type.type == TYPE_UNIT) {
-      *snippet =
-          "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
-                                                                          // typ
-                                                                          // nil
-                                                                          // se
-                                                                          // může
-                                                                          // porovnávat
-                                                                          // pouze
-                                                                          // s
-                                                                          // nil
+      // datový typ nil se může porovnávat pouze s nil
+      *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n";
       break;
     }
 
@@ -433,16 +436,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     if (left->inferred_type.type != right->inferred_type.type) {
       err = IFJ_EINTERNAL;
     } else if (left->inferred_type.type == TYPE_UNIT) {
-      *snippet =
-          "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
-                                                                          // typ
-                                                                          // nil
-                                                                          // se
-                                                                          // může
-                                                                          // porovnávat
-                                                                          // pouze
-                                                                          // s
-                                                                          // nil
+      // datový typ nil se může porovnávat pouze s nil
+      *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n";
       break;
     }
 
@@ -556,9 +551,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     break;
 
   case TOK_AND:
-    if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
-    } else if (left->inferred_type.type != TYPE_BOOL) {
+    if (left->inferred_type.type != right->inferred_type.type ||
+        left->inferred_type.type != TYPE_BOOL) {
       err = IFJ_EINTERNAL;
     }
 
@@ -566,9 +560,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     break;
 
   case TOK_OR:
-    if (left->inferred_type.type != right->inferred_type.type) {
-      err = IFJ_EINTERNAL;
-    } else if (left->inferred_type.type != TYPE_BOOL) {
+    if (left->inferred_type.type != right->inferred_type.type ||
+        left->inferred_type.type != TYPE_BOOL) {
       err = IFJ_EINTERNAL;
     }
 
