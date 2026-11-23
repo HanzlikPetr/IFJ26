@@ -313,8 +313,16 @@ static IFJ_ERR parse_type_id(parser_t *parser, ifj26_type_t *type) {
       !parser_is_keyword(parser, KW_STRING) &&
       !parser_is_keyword(parser, KW_UNIT) &&
       !parser_is_keyword(parser, KW_BOOLEAN)) {
-    LOG_ERR(IFJ_ESEM_UNDEF, "Expected type on line %d",
+    if (parser_is_type(parser, TOK_ID)) {
+      LOG_ERR(IFJ_ESEM_UNDEF, "Undefined type '%s' on line %d",
+              parser->current_token.value.str_value,
+              parser->current_token.line);
+      return IFJ_ESEM_UNDEF;
+    }
+
+    LOG_ERR(IFJ_ESYNTAX, "Expected type on line %d",
             parser->current_token.line);
+
     return IFJ_ESEM_UNDEF;
   }
 
@@ -406,9 +414,6 @@ static IFJ_ERR parse_param_next(parser_t *parser, ast_node_t *param_list) {
   while (parser_is_type(parser, TOK_COMMA)) {
     CHECK_ERR_RET(parser_next(parser));
 
-    /* A trailing comma is valid only before a closing parenthesis on a
-     * later physical line.  Newlines inside parentheses are otherwise
-     * whitespace, so the scanner records this on the ')' token. */
     if (parser_is_type(parser, TOK_RPAREN)) {
       if (!parser->current_token.newline_before) {
         return IFJ_ESYNTAX;

@@ -1,0 +1,24 @@
+// binarni vyhledavani v serazenem seznamu (na vstupu [2 5 8 12 16 23 38] a 16 -> 4)
+import ifj26.*
+
+def binarySearch(arr: List[Int])(target: Int): Int =
+    var low = 0
+    var high = 6
+    while low <= high do
+        val mid = (low + high) / 2
+        val midVal = arr(mid)
+        if midVal == target then
+            return mid
+        else if midVal < target then
+            low = mid + 1
+        else
+            high = mid - 1
+    -1
+
+@main def main(): Unit =
+    val arr: List[Int] = List(
+        readInt(), readInt(), readInt(), readInt(), readInt(), readInt(), readInt()
+    )
+    val idx = binarySearch(arr)(readInt())
+    val out = if idx == -1 then "not found" else idx.toString
+    print(out + "\n")
