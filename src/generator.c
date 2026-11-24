@@ -584,6 +584,76 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
   return IFJ_SUCCESS;
 }
 
+static IFJ_ERR valmem_chain(ast_node_t *expr) {
+  IFJ_ERR err;
+  char *snippet;
+
+  if (expr->as.expr.binary.lhs->type != AST_EXPR) {
+    err = get_snippet(expr->as.expr.unary.operand, &snippet);
+    CHECK_ERR_RET(err);
+
+    if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
+      printf("\tCREATEFRAME\n"
+            "\tPUSHS %s\n"
+            "\tPUSHFRAME\n"
+            "\tCALL toStr\n"
+            "\tPOPFRAME\n"
+            "\tPOPS GF@-temp\n", snippet);
+    } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
+      printf("\tCREATEFRAME\n"
+            "\tPUSHS %s\n"
+            "\tPUSHFRAME\n"
+            "\tCALL toInt\n"
+            "\tPOPFRAME\n"
+            "\tPOPS GF@-temp\n", snippet);
+    } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
+      printf("\tCREATEFRAME\n"
+            "\tPUSHS %s\n"
+            "\tPUSHFRAME\n"
+            "\tCALL strLength\n"
+            "\tPOPFRAME\n"
+            "\tPOPS GF@-temp\n", snippet);
+
+    } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
+      printf("\tCREATEFRAME\n"
+            "\tPUSHS %s\n"
+            "\tPUSHFRAME\n"
+            "\tCALL toInt\n"
+            "\tPOPFRAME\n"
+            "\tPOPS GF@-temp\n"
+            "\tINT2FLOAT GF@-temp GF@-temp\n", snippet);
+    }
+    free(snippet);
+
+    return IFJ_SUCCESS;
+  } else {
+    err = valmem_chain(expr->as.expr.binary.lhs);
+    CHECK_ERR_RET(err);
+
+    printf("\tCREATEFRAME\n");
+    printf("\tPUSHS GF@-temp\n");
+    printf("\tPUSHFRAME\n");
+    
+    if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
+      printf("\tCALL toStr\n");
+    } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
+      printf("\tCALL toInt\n");
+    } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
+      printf("\tCALL strLength\n");
+    } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
+      printf("\tCALL toInt\n"
+            "\tPOPFRAME\n"
+            "\tPOPS GF@-temp\n"
+            "\tINT2FLOAT GF@-temp GF@-temp\n");
+    }
+    
+    printf("\tPOPFRAME\n");
+    printf("\t# end of valmem\n\n");
+
+    return IFJ_SUCCESS;
+  }
+}
+
 static IFJ_ERR calc_expression(ast_node_t *expr) {
   CHECK_ARG_NULL_RET(expr);
   char *snippet;
@@ -616,8 +686,57 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
       return IFJ_EINTERNAL;
     }
 
-    // získání levé strany
-    if (expr->as.expr.binary.lhs->type == AST_EXPR) {
+    if (expr->as.expr.operator_type == TOK_DOT) {
+      if (expr->as.expr.binary.lhs->type != AST_EXPR) {
+        err = get_snippet(expr->as.expr.binary.lhs, &snippet);
+        CHECK_ERR_RET(err);
+
+        if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
+          printf("\n\t# VALMEM\n"
+                "\tCREATEFRAME\n"
+                "\tPUSHS %s\n"
+                "\tPUSHFRAME\n"
+                "\tCALL toStr\n"
+                "\tPOPFRAME\n"
+                "\tPOPS GF@-temp\n", snippet);
+          free(snippet);
+        } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
+          printf("\n\t# VALMEM\n"
+                "\tCREATEFRAME\n"
+                "\tPUSHS %s\n"
+                "\tPUSHFRAME\n"
+                "\tCALL toInt\n"
+                "\tPOPFRAME\n"
+                "\tPOPS GF@-temp\n", snippet);
+          free(snippet);
+        } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
+          printf("\n\t# VALMEM\n"
+                "\tCREATEFRAME\n"
+                "\tPUSHS %s\n"
+                "\tPUSHFRAME\n"
+                "\tCALL strLength\n"
+                "\tPOPFRAME\n"
+                "\tPOPS GF@-temp\n", snippet);
+          free(snippet);
+        } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
+          printf("\n\t# VALMEM\n"
+                "\tCREATEFRAME\n"
+                "\tPUSHS %s\n"
+                "\tPUSHFRAME\n"
+                "\tCALL toInt\n"
+                "\tPOPFRAME\n"
+                "\tPOPS GF@-temp\n"
+                "\tINT2FLOAT GF@-temp GF@-temp\n", snippet);
+          free(snippet);
+        }
+      } else {
+        err = valmem_chain(expr);
+        CHECK_ERR_RET(err);
+        
+      }
+
+      return IFJ_SUCCESS;
+    } else if (expr->as.expr.binary.lhs->type == AST_EXPR) { // získání levé strany
       err = calc_expression(expr->as.expr.binary.lhs);
       CHECK_ERR_RET(err);
 
@@ -1316,7 +1435,7 @@ static IFJ_ERR generate_funcitons(ast_node_t *root) {
 // ==================== EXPORTOVANÉ FUNKCE ====================
 IFJ_ERR generate(ast_node_t *root) {
   CHECK_ARG_NULL_RET(root);
-  // ast_print(root);
+  //ast_print(root);
   IFJ_ERR err;
 
   if (root->type != AST_ROOT) {
