@@ -436,7 +436,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     }
 
     if (left->inferred_type.type ==
-               TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
+        TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
                             // operace EQ
       err = IFJ_EINTERNAL;
     }
@@ -459,7 +459,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     }
 
     if (left->inferred_type.type ==
-               TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
+        TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
                             // operace EQ
       err = IFJ_EINTERNAL;
     }
@@ -673,34 +673,38 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
 
     if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
       printf("\tCREATEFRAME\n"
-            "\tPUSHS %s\n"
-            "\tPUSHFRAME\n"
-            "\tCALL toStr\n"
-            "\tPOPFRAME\n"
-            "\tPOPS GF@-temp\n", snippet);
+             "\tPUSHS %s\n"
+             "\tPUSHFRAME\n"
+             "\tCALL toStr\n"
+             "\tPOPFRAME\n"
+             "\tPOPS GF@-temp\n",
+             snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
       printf("\tCREATEFRAME\n"
-            "\tPUSHS %s\n"
-            "\tPUSHFRAME\n"
-            "\tCALL toInt\n"
-            "\tPOPFRAME\n"
-            "\tPOPS GF@-temp\n", snippet);
+             "\tPUSHS %s\n"
+             "\tPUSHFRAME\n"
+             "\tCALL toInt\n"
+             "\tPOPFRAME\n"
+             "\tPOPS GF@-temp\n",
+             snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
       printf("\tCREATEFRAME\n"
-            "\tPUSHS %s\n"
-            "\tPUSHFRAME\n"
-            "\tCALL strLength\n"
-            "\tPOPFRAME\n"
-            "\tPOPS GF@-temp\n", snippet);
+             "\tPUSHS %s\n"
+             "\tPUSHFRAME\n"
+             "\tCALL strLength\n"
+             "\tPOPFRAME\n"
+             "\tPOPS GF@-temp\n",
+             snippet);
 
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
       printf("\tCREATEFRAME\n"
-            "\tPUSHS %s\n"
-            "\tPUSHFRAME\n"
-            "\tCALL toInt\n"
-            "\tPOPFRAME\n"
-            "\tPOPS GF@-temp\n"
-            "\tINT2FLOAT GF@-temp GF@-temp\n", snippet);
+             "\tPUSHS %s\n"
+             "\tPUSHFRAME\n"
+             "\tCALL toInt\n"
+             "\tPOPFRAME\n"
+             "\tPOPS GF@-temp\n"
+             "\tINT2FLOAT GF@-temp GF@-temp\n",
+             snippet);
     }
     free(snippet);
 
@@ -712,7 +716,7 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
     printf("\tCREATEFRAME\n");
     printf("\tPUSHS GF@-temp\n");
     printf("\tPUSHFRAME\n");
-    
+
     if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
       printf("\tCALL toStr\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
@@ -721,11 +725,11 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
       printf("\tCALL strLength\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
       printf("\tCALL toInt\n"
-            "\tPOPFRAME\n"
-            "\tPOPS GF@-temp\n"
-            "\tINT2FLOAT GF@-temp GF@-temp\n");
+             "\tPOPFRAME\n"
+             "\tPOPS GF@-temp\n"
+             "\tINT2FLOAT GF@-temp GF@-temp\n");
     }
-    
+
     printf("\tPOPFRAME\n");
     printf("\t# end of valmem\n\n");
 
@@ -772,50 +776,54 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
 
         if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
           printf("\n\t# VALMEM\n"
-                "\tCREATEFRAME\n"
-                "\tPUSHS %s\n"
-                "\tPUSHFRAME\n"
-                "\tCALL toStr\n"
-                "\tPOPFRAME\n"
-                "\tPOPS GF@-temp\n", snippet);
+                 "\tCREATEFRAME\n"
+                 "\tPUSHS %s\n"
+                 "\tPUSHFRAME\n"
+                 "\tCALL toStr\n"
+                 "\tPOPFRAME\n"
+                 "\tPOPS GF@-temp\n",
+                 snippet);
           free(snippet);
         } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
           printf("\n\t# VALMEM\n"
-                "\tCREATEFRAME\n"
-                "\tPUSHS %s\n"
-                "\tPUSHFRAME\n"
-                "\tCALL toInt\n"
-                "\tPOPFRAME\n"
-                "\tPOPS GF@-temp\n", snippet);
+                 "\tCREATEFRAME\n"
+                 "\tPUSHS %s\n"
+                 "\tPUSHFRAME\n"
+                 "\tCALL toInt\n"
+                 "\tPOPFRAME\n"
+                 "\tPOPS GF@-temp\n",
+                 snippet);
           free(snippet);
         } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
           printf("\n\t# VALMEM\n"
-                "\tCREATEFRAME\n"
-                "\tPUSHS %s\n"
-                "\tPUSHFRAME\n"
-                "\tCALL strLength\n"
-                "\tPOPFRAME\n"
-                "\tPOPS GF@-temp\n", snippet);
+                 "\tCREATEFRAME\n"
+                 "\tPUSHS %s\n"
+                 "\tPUSHFRAME\n"
+                 "\tCALL strLength\n"
+                 "\tPOPFRAME\n"
+                 "\tPOPS GF@-temp\n",
+                 snippet);
           free(snippet);
         } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
           printf("\n\t# VALMEM\n"
-                "\tCREATEFRAME\n"
-                "\tPUSHS %s\n"
-                "\tPUSHFRAME\n"
-                "\tCALL toInt\n"
-                "\tPOPFRAME\n"
-                "\tPOPS GF@-temp\n"
-                "\tINT2FLOAT GF@-temp GF@-temp\n", snippet);
+                 "\tCREATEFRAME\n"
+                 "\tPUSHS %s\n"
+                 "\tPUSHFRAME\n"
+                 "\tCALL toInt\n"
+                 "\tPOPFRAME\n"
+                 "\tPOPS GF@-temp\n"
+                 "\tINT2FLOAT GF@-temp GF@-temp\n",
+                 snippet);
           free(snippet);
         }
       } else {
         err = valmem_chain(expr);
         CHECK_ERR_RET(err);
-        
       }
 
       return IFJ_SUCCESS;
-    } else if (expr->as.expr.binary.lhs->type == AST_EXPR) { // získání levé strany
+    } else if (expr->as.expr.binary.lhs->type ==
+               AST_EXPR) { // získání levé strany
       err = calc_expression(expr->as.expr.binary.lhs);
       CHECK_ERR_RET(err);
 
@@ -895,7 +903,6 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
         CHECK_ERR_RET(err);
         printf("\tPUSHS GF@-temp\n");
       } else {
-        printf("parameter: %d\n", param->type);
         LOG_ERR(IFJ_EINTERNAL, "Unknown parameter type");
         return IFJ_EINTERNAL;
       }
@@ -1370,6 +1377,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   IFJ_ERR err;
   char *snippet;
 
+
   switch (instruction->type) {
   case AST_EXPR: // 5
     err = calc_expression(instruction);
@@ -1379,14 +1387,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     break;
 
   case AST_VAR: // 6
-    err = get_snippet(instruction, &snippet);
-    CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);
-    free(snippet);
-    break;
-
-  case AST_LITERAL: // 7
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
@@ -1404,7 +1405,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     return condition(instruction);
 
   case AST_FOR: // 12
-    // return for_loop(instruction);
+    // return for_loop(instruction);ahoj"
     // printf("\tfor cycle - TODO\n");
     break;
 
@@ -1430,13 +1431,13 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
 
 static IFJ_ERR generate_body(ast_node_t *body) {
   CHECK_ARG_NULL_RET(body);
-
-  if (body->type != AST_BLOCK) {
-    CHECK_ERR_LOG_RET(IFJ_EINTERNAL, "Passed argument is not a block");
-  }
-
   ast_node_t *instruction;
   IFJ_ERR err;
+
+  if (body->type != AST_BLOCK) {
+    err = generate_instruction(body);
+    return err;
+  }
 
   // definování lokálních proměnných
   printf("\t# Definition of local variables\n");
@@ -1472,19 +1473,21 @@ static IFJ_ERR generate_function(ast_node_t *function) {
   CHECK_ERR_RET(err);
 
   printf("LABEL %s\n", function->as.func.id); // vytvoří návěští funkce
-
   // vytvoří lokální kopie parametrů
-  printf("\t#Local copies of parameters\n");
-  for (size_t i = function->as.func.param_lists_cnt; i > 0; i--) {
-    ast_node_t *param_list = function->as.func.param_lists[i - 1];
-    for (size_t j = param_list->as.param_list.params_cnt; j > 0; j--) {
-      ast_node_t *param = param_list->as.param_list.params[j - 1];
+  if (function->as.func.param_lists != NULL) {
+      printf("\t#Local copies of parameters\n");
+    for (size_t i = function->as.func.param_lists_cnt; i > 0; i--) {
+      ast_node_t *param_list = function->as.func.param_lists[i - 1];
+      for (size_t j = param_list->as.param_list.params_cnt; j > 0; j--) {
+        ast_node_t *param = param_list->as.param_list.params[j - 1];
 
-      printf("\tDEFVAR LF@%s\n", param->as.param.id);
-      printf("\tPOPS LF@%s\n", param->as.param.id);
+        printf("\tDEFVAR LF@%s\n", param->as.param.id);
+        printf("\tPOPS LF@%s\n", param->as.param.id);
+      }
     }
+    printf("\n");
   }
-  printf("\n");
+  
 
   err = generate_body(function->as.func.body);
   CHECK_ERR_GOTO(err, cleanup);
