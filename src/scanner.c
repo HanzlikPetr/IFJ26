@@ -262,7 +262,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         return IFJ_SUCCESS;
 
       case ';':
-        token->type = TOK_SEMICOLON;
+        token->type = TOK_EOL;
         return IFJ_SUCCESS;
 
       case '-':
