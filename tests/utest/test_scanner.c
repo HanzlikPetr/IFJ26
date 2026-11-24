@@ -213,8 +213,8 @@ static void test_unknown_chars(void **state) {
 static void test_single_char_tokens(void **state) {
   (void)state;
   EXPECT("( ) [ ] , : ; * - /", TOK_LPAREN, TOK_RPAREN, TOK_LBRACKET,
-         TOK_RBRACKET, TOK_COMMA, TOK_COLON, TOK_EOL, TOK_MUL, TOK_SUB,
-         TOK_DIV, TOK_EOL, TOK_EOF);
+         TOK_RBRACKET, TOK_COMMA, TOK_COLON, TOK_EOL, TOK_MUL, TOK_SUB, TOK_DIV,
+         TOK_EOL, TOK_EOF);
 }
 
 /**
