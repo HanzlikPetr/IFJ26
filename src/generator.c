@@ -43,6 +43,7 @@ static IFJ_ERR call_func(ast_node_t *func_call);
 static IFJ_ERR generate_body(ast_node_t *body);
 static IFJ_ERR generate_instruction(ast_node_t *instruction);
 static IFJ_ERR define_var(ast_node_t *def);
+static IFJ_ERR condition(ast_node_t *if_st);
 
 static IFJ_ERR start_code(ast_node_t *root) {
   // CHECK_ARG_NULL_RET(root); // redundant
@@ -951,6 +952,12 @@ static IFJ_ERR assign(ast_node_t *assign) {
     free(snippet);
     break;
 
+  case AST_IF:
+    err = condition(assign->as.assign.rhs);
+    CHECK_ERR_RET(err);
+    printf("\tPOPS LF@%s\n", assign->as.assign.id);
+    break;
+
   case AST_FUNC_CALL:
     err = call_func(assign->as.assign.rhs);
     CHECK_ERR_RET(err);
@@ -1021,43 +1028,6 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   int id = ++last_id;
 
   printf("LABEL -start%d\n", id); // redundant?
-  printf("\t# Definition of variables\n");
-
-  // promenne z then vetve
-  for (size_t i = 0; i < if_st->as.if_st.body->as.block.commands_cnt; i++) {
-    ast_node_t *instruction = if_st->as.if_st.body->as.block.commands[i];
-
-    if (instruction->type == AST_DEF) {
-      err = define_var(instruction);
-      CHECK_ERR_RET(err);
-    }
-  }
-
-  // promenne z else vetve
-  if (if_st->as.if_st.else_st) {
-    for (size_t i = 0; i < if_st->as.if_st.else_st->as.block.commands_cnt;
-         i++) {
-      ast_node_t *instruction = if_st->as.if_st.else_st->as.block.commands[i];
-
-      if (instruction->type == AST_DEF) {
-        err = define_var(instruction);
-        CHECK_ERR_RET(err);
-      }
-    }
-  }
-
-  // promenne z if else vetve
-  for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
-    ast_node_t *body = if_st->as.if_st.else_if[i];
-
-    for (size_t j = 0; j < body->as.block.commands_cnt; j++) {
-      ast_node_t *instruction = body->as.block.commands[j];
-      if (instruction->type == AST_DEF) {
-        err = define_var(instruction);
-        CHECK_ERR_RET(err);
-      }
-    }
-  }
 
   switch (if_st->as.if_st.expr->type) {
   case AST_VAR:
@@ -1166,6 +1136,10 @@ static IFJ_ERR define_var(ast_node_t *def) {
         err = calc_expression(def->as.def.rhs);
         CHECK_ERR_RET(err);
         printf("\tMOVE LF@%s GF@-temp\n", def->as.def.id);
+      } else if (def->as.def.rhs->type == AST_IF) {
+        err = condition(def->as.def.rhs);
+        CHECK_ERR_RET(err);
+        printf("\tPOPS LF@%s\n", def->as.def.id);
       }
 
       return IFJ_SUCCESS;
@@ -1267,6 +1241,325 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
   printf("\tJUMP -whileStart%d\n", id);
 
   printf("\nLABEL -whileEnd%d\n", id);
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR define_loop_var(ast_node_t *gen) {
+  CHECK_ARG_NULL_RET(gen);
+  IFJ_ERR err;
+  char *snippet;
+
+  for (size_t i = 1; i < local_ids.size; i++) {
+    if (strcmp(gen->as.for_gen.id, local_ids.data[i]) == 0) {
+      if (gen->as.for_gen.range != NULL) {
+        if (gen->as.for_gen.expr->type == AST_LITERAL) {
+          err = get_snippet(gen->as.for_gen.expr, &snippet);
+          CHECK_ERR_RET(err);
+
+          printf("\tMOVE LF@%s %s\n", gen->as.for_gen.id, snippet);
+          free(snippet);
+        } else if (gen->as.for_gen.expr->type == AST_VAR) {
+          err = get_snippet(gen->as.for_gen.expr, &snippet);
+          CHECK_ERR_RET(err);
+
+          printf("\tMOVE LF@%s %s\n", gen->as.for_gen.id, snippet);
+          free(snippet);
+        } else if (gen->as.for_gen.expr->type == AST_FUNC_CALL) {
+          err = call_func(gen->as.for_gen.expr);
+          CHECK_ERR_RET(err);
+
+          printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
+        } else if (gen->as.for_gen.expr->type == AST_EXPR) {
+          err = calc_expression(gen->as.for_gen.expr);
+          CHECK_ERR_RET(err);
+          printf("\tMOVE LF@%s GF@-temp\n", gen->as.for_gen.id);
+        } else if (gen->as.for_gen.expr->type == AST_IF) {
+          err = condition(gen->as.for_gen.expr);
+          CHECK_ERR_RET(err);
+          printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
+        }
+      } else {
+        // lists - TODO
+      }
+
+      return IFJ_SUCCESS;
+    }
+  }
+
+  printf("\tDEFVAR LF@%s\n", gen->as.for_gen.id);
+
+  switch (gen->as.for_gen.expr->type) {
+  case AST_EXPR:
+    err = calc_expression(gen->as.for_gen.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tMOVE LF@%s GF@-temp\n", gen->as.for_gen.id);
+    break;
+
+  case AST_VAR:
+    err = get_snippet(gen->as.for_gen.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tMOVE LF@%s %s\n", gen->as.for_gen.id, snippet);
+    free(snippet);
+    break;
+
+  case AST_LITERAL:
+    err = get_snippet(gen->as.for_gen.expr, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tMOVE LF@%s %s\n", gen->as.for_gen.id, snippet);
+    free(snippet);
+    break;
+
+  case AST_IF:
+    err = condition(gen->as.for_gen.expr);
+    CHECK_ERR_RET(err);
+    printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
+    break;
+
+  case AST_FUNC_CALL:
+    err = call_func(gen->as.for_gen.expr);
+    CHECK_ERR_RET(err);
+
+    printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
+    break;
+
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Unknown expression in for loop");
+    return IFJ_EINTERNAL;
+  }
+
+  char **p = realloc(local_ids.data, (local_ids.size + 1) * sizeof *p);
+  CHECK_MEM_ERR(p);
+  local_ids.data = p;
+
+  local_ids.data[local_ids.size] = gen->as.for_gen.id;
+  local_ids.size = local_ids.size + 1;
+
+  return IFJ_SUCCESS;
+}
+
+static IFJ_ERR for_loop(ast_node_t *for_loop) {
+  CHECK_ARG_NULL_RET(for_loop);
+  IFJ_ERR err;
+  char *snippet;
+  static int last_id = 0;
+  int id = ++last_id;
+  ast_node_t *body = for_loop->as.for_st.body;
+  ast_node_t *gen = for_loop->as.for_st.gen;
+  ast_node_t *range = gen->as.for_gen.range;
+  // ast_node_t *step = range->as.for_range.by_expr;
+
+  // definování vnořených proměnných cyklů
+  printf("\n\t# Definition of loop variables\n");
+  err = define_loop_var(gen);
+  CHECK_ERR_RET(err);
+
+  printf("\tDEFVAR LF@-forHelp2-%d\n", id);
+
+  char *loop_var = gen->as.for_gen.id;
+
+  if (range != NULL) {
+    // char *operace = include ? JUMPIFGEQ : JUPIFGT; - pak %s v porovnavanich
+    printf("\t# Condition\n");
+    switch (range->as.for_range.expr->type) {
+    case AST_LITERAL:
+      err = get_snippet(range->as.for_range.expr, &snippet);
+      CHECK_ERR_RET(err);
+
+      if (!range->as.for_range.until) {
+        printf("\tDEFVAR LF@-forHelp%d\n", id);
+        printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
+      }
+
+      free(snippet);
+
+      printf("\nLABEL -for%d\n", id);
+
+      printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+      break;
+
+    case AST_VAR:
+      err = get_snippet(range->as.for_range.expr, &snippet);
+      CHECK_ERR_RET(err);
+
+      if (!range->as.for_range.until) {
+        printf("\tADD %s %s int@1\n", snippet, snippet);
+      }
+
+      printf("\nLABEL -for%d\n", id);
+
+      printf("\tLT GF@-temp LF@%s %s\n", loop_var, snippet);
+      free(snippet);
+      break;
+
+    case AST_EXPR:
+      err = calc_expression(range->as.for_range.expr);
+      CHECK_ERR_RET(err);
+
+      if (!range->as.for_range.until) {
+        printf("\tADD GF@-temp GF@-temp int@1\n");
+      }
+
+      printf("\nLABEL -for%d\n", id);
+
+      printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
+      break;
+
+    case AST_FUNC_CALL:
+      err = call_func(range->as.for_range.expr);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+
+      if (!range->as.for_range.until) {
+        printf("\tADD GF@-temp GF@-temp int@1\n");
+      }
+
+      printf("\nLABEL -for%d\n", id);
+
+      printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
+      break;
+
+    case AST_IF:
+      err = condition(range->as.for_range.expr);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+
+      if (!range->as.for_range.until) {
+        printf("\tADD GF@-temp GF@-temp int@1\n");
+      }
+
+      printf("\nLABEL -for%d\n", id);
+
+      printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
+      break;
+
+    default:
+      LOG_ERR(IFJ_EINTERNAL, "Unknown expression in for loop");
+      return IFJ_EINTERNAL;
+    }
+
+  } else {
+    // LISTS - TODO
+  }
+
+  printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
+
+  printf("\t# Guards\n");
+  for (size_t i = 0; i < for_loop->as.for_st.guards_cnt; i++) {
+    ast_node_t *guard = for_loop->as.for_st.guards[i];
+
+    switch (guard->as.for_guard.expr->type) {
+    case AST_LITERAL:
+      err = get_snippet(guard->as.for_guard.expr, &snippet);
+      CHECK_ERR_RET(err);
+
+      printf("\n\tJUMPIFEQ -forSkip%d %s bool@false\n", id, snippet);
+      free(snippet);
+      break;
+
+    case AST_VAR:
+      err = get_snippet(guard->as.for_guard.expr, &snippet);
+      CHECK_ERR_RET(err);
+
+      printf("\n\tJUMPIFEQ -forSkip%d %s bool@false\n", id, snippet);
+      free(snippet);
+      break;
+
+    case AST_EXPR:
+      err = calc_expression(guard->as.for_guard.expr);
+      CHECK_ERR_RET(err);
+
+      printf("\n\tJUMPIFEQ -forSkip%d GF@-temp bool@false\n", id);
+      break;
+
+    case AST_FUNC_CALL:
+      err = call_func(guard->as.for_guard.expr);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+      printf("\n\tJUMPIFEQ -forSkip%d GF@-temp bool@false\n", id);
+      break;
+
+    case AST_IF:
+      err = condition(guard->as.for_guard.expr);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+      printf("\n\tJUMPIFEQ -forSkip%d GF@-temp bool@false\n", id);
+      break;
+
+    default:
+      LOG_ERR(IFJ_EINTERNAL, "Unknown expression in for loop");
+      return IFJ_EINTERNAL;
+    }
+  }
+
+  err = generate_body(body);
+  CHECK_ERR_RET(err);
+
+  printf("\nLABEL -forSkip%d\n", id);
+
+  printf("\tMOVE LF@-forHelp2-%d LF@%s\n", id, loop_var);
+  // Přičítání skoku
+  if (range->as.for_range.by_expr) {
+    switch (range->as.for_range.by_expr->type) {
+    case AST_LITERAL:
+      err = get_snippet(range->as.for_range.by_expr, &snippet);
+      CHECK_ERR_RET(err);
+
+      printf("\n\tADD LF@%s LF@%s %s\n", loop_var, loop_var, snippet);
+      free(snippet);
+      break;
+
+    case AST_VAR:
+      err = get_snippet(range->as.for_range.by_expr, &snippet);
+      CHECK_ERR_RET(err);
+
+      printf("\n\tADD LF@%s LF@%s %s\n", loop_var, loop_var, snippet);
+      free(snippet);
+      break;
+
+    case AST_EXPR:
+      err = calc_expression(range->as.for_range.by_expr);
+      CHECK_ERR_RET(err);
+
+      printf("\n\tADD LF@%s LF@%s GF@-temp\n", loop_var, loop_var);
+      break;
+
+    case AST_FUNC_CALL:
+      err = call_func(range->as.for_range.by_expr);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+      printf("\n\tADD LF@%s LF@%s GF@-temp\n", loop_var, loop_var);
+      break;
+
+    case AST_IF:
+      err = condition(range->as.for_range.by_expr);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+      printf("\n\tADD LF@%s LF@%s GF@-temp\n", loop_var, loop_var);
+      break;
+
+    default:
+      LOG_ERR(IFJ_EINTERNAL, "Unknown expression in for loop");
+      return IFJ_EINTERNAL;
+    }
+  } else {
+    printf("\n\tADD LF@%s LF@%s int@1\n", loop_var, loop_var);
+  }
+
+  printf("\tGT GF@-temp LF@%s LF@-forHelp2-%d\n", loop_var, id);
+  printf("\tJUMPIFEQ -error GF@-temp bool@false\n");
+  printf("\tJUMP -for%d\n", id);
+
+  printf("\nLABEL -forEnd%d\n", id);
 
   return IFJ_SUCCESS;
 }
@@ -1457,9 +1750,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     return condition(instruction);
 
   case AST_FOR: // 12
-    // return for_loop(instruction);ahoj"
-    // printf("\tfor cycle - TODO\n");
-    break;
+    return for_loop(instruction);
 
   case AST_WHILE: // 16
     return while_loop(instruction);
