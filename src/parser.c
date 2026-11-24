@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "error.h"
 #include "parser.h"
 #include "psa.h"
 
@@ -323,7 +324,7 @@ static IFJ_ERR parse_type_id(parser_t *parser, ifj26_type_t *type) {
     LOG_ERR(IFJ_ESYNTAX, "Expected type on line %d",
             parser->current_token.line);
 
-    return IFJ_ESEM_UNDEF;
+    return IFJ_ESYNTAX;
   }
 
   switch (parser->current_token.value.keyword) {
