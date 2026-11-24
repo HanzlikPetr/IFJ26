@@ -191,6 +191,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
         scanner->after_semicolon = false; // Za středníkem je další token
         if (scanner->expect_line_end) {
+          LOG_ERR(IFJ_ESYNTAX, "Token after multiline comment on line %d",
+                  scanner->line);
           return IFJ_ESYNTAX; // Token za víceřádkovým komentářem.
         }
         if (scanner->at_line_start) {
@@ -213,6 +215,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
               count++;
             }
             if (current != scanner->line_indent) {
+              LOG_ERR(IFJ_ESYNTAX, "Inconsistent indentation on line %d",
+                      scanner->line);
               return IFJ_ESYNTAX; // Odsazení neodpovídá žádné úrovni
             }
             ungetc(c, stdin);
@@ -329,6 +333,9 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
           bool skip = next == '\n' || next == '/' || next == EOF ||
                       next == '\t' || next == ')' || next == ']';
           if (!skip && spaces <= scanner->line_indent) {
+            LOG_ERR(IFJ_ESYNTAX,
+                    "Continuation line not indented enough on line %d",
+                    scanner->line);
             return IFJ_ESYNTAX; // Pokračovací řádek není odsazený víc
           }
           break;
@@ -394,6 +401,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
 
       case '\t':
         if (scanner->at_line_start) {
+          LOG_ERR(IFJ_ELEX, "Tab in indentation on line %d", scanner->line);
           return IFJ_ELEX; // Tabulátor v odsazení
         }
         break;
@@ -421,7 +429,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
           }
           break;
         }
-
+        LOG_ERR(IFJ_ELEX, "Unknown character '%c' on line %d", c,
+                scanner->line);
         return IFJ_ELEX;
       }
       break;
@@ -497,6 +506,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         return IFJ_SUCCESS;
 
       default:
+        LOG_ERR(IFJ_ELEX, "Expected '&&' on line %d", scanner->line);
         return IFJ_ELEX;
       }
 
@@ -507,6 +517,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         return IFJ_SUCCESS;
 
       default:
+        LOG_ERR(IFJ_ELEX, "Expected '||' on line %d", scanner->line);
         return IFJ_ELEX;
       }
 
@@ -518,6 +529,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         ungetc(c, stdin);
 
         if (str.len == 1 && str.data[0] == '_') {
+          LOG_ERR(IFJ_ELEX, "Lone '_' is not an identifier on line %d",
+                  scanner->line);
           err = IFJ_ELEX;
           goto cleanup;
         }
@@ -551,6 +564,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
 
       default:
         if (scanner->expect_line_end) {
+          LOG_ERR(IFJ_ESYNTAX, "Token after multiline comment on line %d",
+                  scanner->line);
           return IFJ_ESYNTAX; // Token za víceřádkovým komentářem.
         }
 
@@ -584,6 +599,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         break;
 
       case EOF:
+        LOG_ERR(IFJ_ELEX, "Unterminated block comment on line %d",
+                scanner->line);
         return IFJ_ELEX;
 
       default:
@@ -626,6 +643,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         break;
 
       case EOF:
+        LOG_ERR(IFJ_ELEX, "Unterminated block comment on line %d",
+                scanner->line);
         return IFJ_ELEX;
 
       default:
@@ -651,6 +670,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         break;
 
       case EOF:
+        LOG_ERR(IFJ_ELEX, "Unterminated block comment on line %d",
+                scanner->line);
         return IFJ_ELEX;
 
       default:
@@ -702,6 +723,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       } else if (c == '_') {
         break;
       } else {
+        LOG_ERR(IFJ_ELEX, "Invalid number literal on line %d", scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       }
@@ -709,6 +731,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
 
     case STATE_ZERO:
       if (isdigit(c) || c == '_') {
+        LOG_ERR(IFJ_ELEX, "Number cannot start with zero on line %d",
+                scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       } else if (c == '.') {
@@ -780,6 +804,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       } else if (c == '_') {
         // zůstáváme, další podtržítko
       } else {
+        LOG_ERR(IFJ_ELEX, "Invalid number literal on line %d", scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       }
@@ -813,6 +838,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP_NUM;
       } else {
+        LOG_ERR(IFJ_ELEX, "Invalid number literal on line %d", scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       }
@@ -824,6 +850,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         CHECK_ERR_GOTO(err, cleanup);
         state = STATE_EXP_NUM;
       } else {
+        LOG_ERR(IFJ_ELEX, "Invalid number literal on line %d", scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       }
@@ -857,6 +884,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       } else if (c == '_') {
         // zůstáváme, další podtržítko
       } else {
+        LOG_ERR(IFJ_ELEX, "Invalid number literal on line %d", scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       }
@@ -878,6 +906,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         return IFJ_SUCCESS;
 
       } else if (c == '\n' || c == EOF) {
+        LOG_ERR(IFJ_ELEX, "Unterminated string on line %d", scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
 
@@ -910,6 +939,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         break;
       default:
         // neznámá escape sekvence
+        LOG_ERR(IFJ_ELEX, "Invalid escape sequence '\\%c' on line %d", c,
+                scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
       }
@@ -938,6 +969,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         state = STATE_ML_STRING_Q1;
 
       } else if (c == EOF) {
+        LOG_ERR(IFJ_ELEX, "Unterminated multiline string on line %d",
+                scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
 
@@ -954,6 +987,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       if (c == '"') {
         state = STATE_ML_STRING_Q2;
       } else if (c == EOF) {
+        LOG_ERR(IFJ_ELEX, "Unterminated multiline string on line %d",
+                scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
 
@@ -972,6 +1007,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         return IFJ_SUCCESS;
 
       } else if (c == EOF) {
+        LOG_ERR(IFJ_ELEX, "Unterminated multiline string on line %d",
+                scanner->line);
         err = IFJ_ELEX;
         goto cleanup;
 
@@ -994,6 +1031,8 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         CHECK_ERR_GOTO(err, cleanup);
         state = STATE_AT_ID;
       } else {
+        LOG_ERR(IFJ_ELEX, "Expected annotation name after '@' on line %d",
+                scanner->line);
         return IFJ_ELEX;
       }
       break;
@@ -1009,6 +1048,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         dstring_free(&str);
 
         if (!is_main) {
+          LOG_ERR(IFJ_ELEX, "Unknown annotation on line %d", scanner->line);
           return IFJ_ELEX;
         }
         token->type = TOK_ANNOT_MAIN;
@@ -1057,6 +1097,7 @@ IFJ_ERR scanner_unread_token(scanner_t *scanner, token_t *token) {
   // V zásobě už je token načtený přes peek, vrácený token bychom
   // ztratili - vrátit lze jen jeden token.
   if (scanner->has_peeked) {
+    LOG_ERR(IFJ_EINTERNAL, "Cannot unread token, buffer is full");
     return IFJ_EINTERNAL;
   }
 
