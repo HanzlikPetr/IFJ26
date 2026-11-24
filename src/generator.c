@@ -42,6 +42,7 @@ static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet);
 static IFJ_ERR call_func(ast_node_t *func_call);
 static IFJ_ERR generate_body(ast_node_t *body);
 static IFJ_ERR generate_instruction(ast_node_t *instruction);
+static IFJ_ERR define_var(ast_node_t *def);
 
 static IFJ_ERR start_code(ast_node_t *root) {
   // CHECK_ARG_NULL_RET(root); // redundant
@@ -423,7 +424,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       }
     }
 
-    *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tNOT GF@-temp\n";
+    *snippet =
+        "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tNOT GF@-temp GF@-temp\n";
     break;
 
   case TOK_LT:
@@ -615,13 +617,13 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       err = IFJ_EINTERNAL;
     }
 
+    // Oba operandy jsou stejného typu a to buď TYPE_DOUBLE nebo TYPE_INT
     if (left->inferred_type.type == TYPE_DOUBLE) {
       *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
-    } else if (left->inferred_type.type == TYPE_INT) {
-      *snippet = "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     } else {
-      err = IFJ_EINTERNAL;
+      *snippet = "\tIDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     }
+
     break;
 
   case TOK_AND:
@@ -708,19 +710,21 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
 
     if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
       printf("\tCALL toStr\n");
+      printf("\tPOPS GF@-temp\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
       printf("\tCALL toInt\n");
+      printf("\tPOPS GF@-temp\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
       printf("\tCALL strLength\n");
+      printf("\tPOPS GF@-temp\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
       printf("\tCALL toInt\n"
-             "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n"
              "\tINT2FLOAT GF@-temp GF@-temp\n");
     }
 
     printf("\tPOPFRAME\n");
-    printf("\t# end of valmem\n\n");
+    printf("\t# end of valmem chain\n\n");
 
     return IFJ_SUCCESS;
   }
@@ -732,7 +736,9 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
   IFJ_ERR err;
 
   if (expr->as.expr.is_unary) {
-    if (expr->as.expr.operator_type != TOK_NOT) { // jediný unární operand
+    if (expr->as.expr.operator_type != TOK_NOT &&
+        expr->as.expr.operator_type != TOK_SUB) {
+      printf("%d", expr->as.expr.operator_type);
       return IFJ_EINTERNAL;
     }
 
@@ -752,7 +758,17 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
       free(snippet);
     }
 
-    printf("\tNOT GF@-temp\n");
+    if (expr->as.expr.operator_type == TOK_NOT) {
+      printf("\tNOT GF@-temp GF@-temp\n");
+    } else if (expr->as.expr.operator_type == TOK_SUB) {
+      if (expr->as.expr.unary.operand->inferred_type.type == TYPE_INT) {
+        printf("\tMUL GF@-temp GF@-temp int@-1\n");
+      } else if (expr->as.expr.unary.operand->inferred_type.type ==
+                 TYPE_DOUBLE) {
+        printf("\tMUL GF@-temp GF@-temp float@-1.0\n");
+      }
+    }
+
   } else {
     if (expr->as.expr.operator_type == TOK_NOT) { // jediný nebinární operand
       return IFJ_EINTERNAL;
@@ -880,7 +896,7 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
       ast_node_t *param = param_list->as.param_list.params[j];
 
       if (param->type == AST_VAR) {
-        printf("\tPUSHS LF@%s\n", param->as.param.id);
+        printf("\tPUSHS LF@%s\n", param->as.var.id);
       } else if (param->type == AST_LITERAL) {
         err = get_snippet(param, &snippet);
         CHECK_ERR_RET(err);
@@ -1005,6 +1021,43 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   int id = ++last_id;
 
   printf("LABEL -start%d\n", id); // redundant?
+  printf("\t# Definition of variables\n");
+
+  // promenne z then vetve
+  for (size_t i = 0; i < if_st->as.if_st.body->as.block.commands_cnt; i++) {
+    ast_node_t *instruction = if_st->as.if_st.body->as.block.commands[i];
+
+    if (instruction->type == AST_DEF) {
+      err = define_var(instruction);
+      CHECK_ERR_RET(err);
+    }
+  }
+
+  // promenne z else vetve
+  if (if_st->as.if_st.else_st) {
+    for (size_t i = 0; i < if_st->as.if_st.else_st->as.block.commands_cnt;
+         i++) {
+      ast_node_t *instruction = if_st->as.if_st.else_st->as.block.commands[i];
+
+      if (instruction->type == AST_DEF) {
+        err = define_var(instruction);
+        CHECK_ERR_RET(err);
+      }
+    }
+  }
+
+  // promenne z if else vetve
+  for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
+    ast_node_t *body = if_st->as.if_st.else_if[i];
+
+    for (size_t j = 0; j < body->as.block.commands_cnt; j++) {
+      ast_node_t *instruction = body->as.block.commands[j];
+      if (instruction->type == AST_DEF) {
+        err = define_var(instruction);
+        CHECK_ERR_RET(err);
+      }
+    }
+  }
 
   switch (if_st->as.if_st.expr->type) {
   case AST_VAR:
