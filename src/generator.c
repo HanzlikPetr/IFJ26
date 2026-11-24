@@ -74,7 +74,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
   printf("LABEL -error\n"
          "\tEXIT int@40\n");
 
-  printf("\t# Built-in functions\n");
+  printf("\n\t# Built-in functions\n");
 
   printf("LABEL print\n"
          "\tDEFVAR LF@symb\n"
@@ -263,11 +263,16 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\nLABEL -ordErr\n"
          "\tPUSHS int@-1\n"
          "\nLABEL -ordSkip\n"
-         "\tRETURN\n");
+         "\tRETURN\n\n");
 
   printf("LABEL chr\n"
          "\tPOPS GF@-temp\n"
          "\tINT2CHAR GF@-temp GF@-temp\n"
+         "\tPUSHS GF@-temp\n"
+         "\tRETURN\n\n");
+
+  printf("LABEL readBoolean\n"
+         "\tREAD GF@-temp bool\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
@@ -482,16 +487,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     }
 
     if (left->inferred_type.type == TYPE_UNIT) {
-      *snippet =
-          "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
-                                                                          // typ
-                                                                          // nil
-                                                                          // se
-                                                                          // může
-                                                                          // porovnávat
-                                                                          // pouze
-                                                                          // s
-                                                                          // nil
+      // datový typ nil se může porovnávat pouze s nil
+      *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n";
       break;
     }
 
@@ -516,16 +513,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     }
 
     if (left->inferred_type.type == TYPE_UNIT) {
-      *snippet =
-          "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n"; // datový
-                                                                          // typ
-                                                                          // nil
-                                                                          // se
-                                                                          // může
-                                                                          // porovnávat
-                                                                          // pouze
-                                                                          // s
-                                                                          // nil
+      // datový typ nil se může porovnávat pouze s nil
+      *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n";
       break;
     }
 
@@ -1377,7 +1366,6 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   IFJ_ERR err;
   char *snippet;
 
-
   switch (instruction->type) {
   case AST_EXPR: // 5
     err = calc_expression(instruction);
@@ -1418,7 +1406,6 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   case AST_FUNC_CALL: // 18
     err = call_func(instruction);
     CHECK_ERR_RET(err);
-    // printf("\tCLEARS\n\n");
     break;
 
   default:
@@ -1475,7 +1462,7 @@ static IFJ_ERR generate_function(ast_node_t *function) {
   printf("LABEL %s\n", function->as.func.id); // vytvoří návěští funkce
   // vytvoří lokální kopie parametrů
   if (function->as.func.param_lists != NULL) {
-      printf("\t#Local copies of parameters\n");
+    printf("\t#Local copies of parameters\n");
     for (size_t i = function->as.func.param_lists_cnt; i > 0; i--) {
       ast_node_t *param_list = function->as.func.param_lists[i - 1];
       for (size_t j = param_list->as.param_list.params_cnt; j > 0; j--) {
@@ -1487,7 +1474,6 @@ static IFJ_ERR generate_function(ast_node_t *function) {
     }
     printf("\n");
   }
-  
 
   err = generate_body(function->as.func.body);
   CHECK_ERR_GOTO(err, cleanup);
@@ -1517,7 +1503,7 @@ static IFJ_ERR generate_funcitons(ast_node_t *root) {
 // ==================== EXPORTOVANÉ FUNKCE ====================
 IFJ_ERR generate(ast_node_t *root) {
   CHECK_ARG_NULL_RET(root);
-  //ast_print(root);
+  // ast_print(root);
   IFJ_ERR err;
 
   if (root->type != AST_ROOT) {
