@@ -891,6 +891,9 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
         err = calc_expression(param);
         CHECK_ERR_RET(err);
         printf("\tPUSHS GF@-temp\n");
+      } else if (param->type == AST_FUNC_CALL) {
+        err = call_func(param);
+        CHECK_ERR_RET(err);
       } else {
         LOG_ERR(IFJ_EINTERNAL, "Unknown parameter type");
         return IFJ_EINTERNAL;
@@ -1354,7 +1357,6 @@ static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet) {
     return get_literal(instruction, snippet);
 
   default:
-    printf("\tINSTRUCTION: %d\n", instruction->type);
     LOG_ERR(IFJ_EINTERNAL, "Unknown instruction given to get_snippet");
     return IFJ_EINTERNAL;
   }
@@ -1375,6 +1377,15 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     break;
 
   case AST_VAR: // 6
+
+    err = get_snippet(instruction, &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tPUSHS %s\n", snippet);
+    free(snippet);
+    break;
+
+  case AST_LITERAL: // 6
 
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
