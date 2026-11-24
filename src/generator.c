@@ -79,7 +79,13 @@ static IFJ_ERR start_code(ast_node_t *root) {
   printf("LABEL print\n"
          "\tDEFVAR LF@symb\n"
          "\tPOPS LF@symb\n"
+         "\tTYPE GF@-temp LF@symb\n"
+         "\tJUMPIFEQ -printNil GF@-temp string@nil\n"
          "\tWRITE LF@symb\n"
+         "\tJUMP -endPrint\n"
+         "\nLABEL -printNil\n"
+         "\tWRITE string@()\n"
+         "\nLABEL -endPrint\n"
          "\tRETURN\n\n");
 
   printf("LABEL readLine\n"
@@ -691,6 +697,7 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
         CHECK_ERR_RET(err);
         printf("\tPUSHS GF@-temp\n");
       } else {
+        printf("parameter: %d\n", param->type);
         LOG_ERR(IFJ_EINTERNAL, "Unknown parameter type");
         return IFJ_EINTERNAL;
       }
