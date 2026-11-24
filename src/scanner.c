@@ -112,6 +112,7 @@ IFJ_ERR scanner_init(scanner_t *scanner) {
   scanner->pending_dedents = 0;
   scanner->expect_line_end = false;
   scanner->has_peeked = false;
+  scanner->after_semicolon = false;
   return IFJ_SUCCESS;
 }
 
@@ -188,6 +189,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       token->line = scanner->line;
 
       if (c != ' ' && c != '\t' && c != '\n' && c != EOF && c != '/') {
+        scanner->after_semicolon = false; // Za středníkem je další token
         if (scanner->expect_line_end) {
           return IFJ_ESYNTAX; // Token za víceřádkovým komentářem.
         }
@@ -263,6 +265,7 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
 
       case ';':
         token->type = TOK_EOL;
+        scanner->after_semicolon = true;
         return IFJ_SUCCESS;
 
       case '-':
@@ -276,8 +279,12 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
       case EOF:
         if (!scanner->at_line_start) {
           scanner->at_line_start = true;
-          token->type = TOK_EOL;
-          return IFJ_SUCCESS;
+          if (scanner->after_semicolon) {
+            scanner->after_semicolon = false; // EOL už vrátil středník
+          } else {
+            token->type = TOK_EOL;
+            return IFJ_SUCCESS;
+          }
         }
 
         {
@@ -327,6 +334,12 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
           break;
         }
         if (scanner->at_line_start) {
+          break;
+        }
+        if (scanner->after_semicolon) {
+          // EOL už vrátil středník
+          scanner->after_semicolon = false;
+          scanner->at_line_start = true;
           break;
         }
         token->type = TOK_EOL;
@@ -590,8 +603,12 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
             scanner->line_indent = 0;
             if (!scanner->at_line_start) {
               scanner->at_line_start = true;
-              token->type = TOK_EOL;
-              return IFJ_SUCCESS;
+              if (scanner->after_semicolon) {
+                scanner->after_semicolon = false;
+              } else {
+                token->type = TOK_EOL;
+                return IFJ_SUCCESS;
+              }
             }
           }
         } else {
