@@ -1145,6 +1145,26 @@ static IFJ_ERR check_if_branch(sem_ctx_t *ctx, ast_node_t *branch,
 }
 
 /**
+ * @brief Zjistí, zda větev končí příkazem return (a tedy nevrací hodnotu).
+ * @param branch AST uzel větve (blok nebo přímo return).
+ * @return true, pokud poslední příkaz větve je return.
+ */
+static bool branch_ends_with_return(const ast_node_t *branch) {
+  if (branch == NULL) {
+    return false;
+  }
+  if (branch->type == AST_FUNC_RET) {
+    return true;
+  }
+  if (branch->type != AST_BLOCK || branch->as.block.commands_cnt == 0) {
+    return false;
+  }
+  const ast_node_t *last =
+      branch->as.block.commands[branch->as.block.commands_cnt - 1];
+  return last != NULL && last->type == AST_FUNC_RET;
+}
+
+/**
  * @brief Pomocná funkce pro kontrolu if použitého jako výraz (musí mít větev
  *        else; typem výrazu je sjednocený typ větví then, else if a else,
  *        přičemž se aplikuje implicitní konverze Int na Double). Chybí-li
@@ -1186,6 +1206,7 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   // Sjednocení typů všech větví; výsledkem je typ první větve, pokud jsou
   // kompatibilní, jinak typ pozdější větve (implicitní konverze Int na Double)
   ifj26_type_t unified_type = branch_type;
+  bool unified_is_never = branch_ends_with_return(if_node->as.if_st.body);
 
   for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
     if (if_node->as.if_st.else_if[i] == NULL) {
@@ -1202,6 +1223,17 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
     err = check_if_branch(ctx, if_node->as.if_st.else_if[i]->as.else_if_st.body,
                           &branch_type);
     CHECK_ERR_LOG_RET(err, "Failed to check else if branch in if statement.");
+
+    // Větev končící return nevrací hodnotu, proto se sjednocení typů neúčastní.
+    if (branch_ends_with_return(
+            if_node->as.if_st.else_if[i]->as.else_if_st.body)) {
+      continue;
+    }
+    if (unified_is_never) {
+      unified_type = branch_type;
+      unified_is_never = false;
+      continue;
+    }
 
     if (!types_compatible(&unified_type, &branch_type)) {
       if (!types_compatible(&branch_type, &unified_type)) {
@@ -1220,7 +1252,11 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   err = check_if_branch(ctx, if_node->as.if_st.else_st, &branch_type);
   CHECK_ERR_LOG_RET(err, "Failed to check else block in if statement.");
 
-  if (!types_compatible(&unified_type, &branch_type)) {
+  if (branch_ends_with_return(if_node->as.if_st.else_st)) {
+    // else větev končí return, nevrací hodnotu
+  } else if (unified_is_never) {
+    unified_type = branch_type;
+  } else if (!types_compatible(&unified_type, &branch_type)) {
     if (!types_compatible(&branch_type, &unified_type)) {
       CHECK_ERR_LOG_RET(
           IFJ_ESEM_TYPE,
