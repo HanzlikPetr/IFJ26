@@ -529,10 +529,10 @@ static IFJ_ERR scanner_read_token(scanner_t *scanner, token_t *token) {
         ungetc(c, stdin);
 
         if (str.len == 1 && str.data[0] == '_') {
-          LOG_ERR(IFJ_ELEX, "Lone '_' is not an identifier on line %d",
-                  scanner->line);
-          err = IFJ_ELEX;
-          goto cleanup;
+          // Samotné podtržítko není identifikátor, ale samostatný token
+          dstring_free(&str);
+          token->type = TOK_UNDERSCORE;
+          return IFJ_SUCCESS;
         }
         // Zkontrolovat jestli je to klíčové slovo
         for (size_t i = 0; i < KEYWORD_COUNT; i++) {
