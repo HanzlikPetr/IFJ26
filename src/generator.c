@@ -278,6 +278,16 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  printf("LABEL -floorHelp\n"
+         "\tDEFVAR LF@number\n"
+         "\tPOPS LF@number\n"
+         "\tLT GF@-temp LF@number int@0\n"
+         "\tJUMPIFEQ -floorHelpSkip GF@-temp bool@false\n"
+         "\tSUB LF@number LF@number int@1\n"
+         "\nLABEL -floorHelpSkip\n"
+         "\tPUSHS LF@number\n"
+         "\tRETURN\n\n");
+
   printf("\t# User defined functions\n");
   return IFJ_SUCCESS;
 }
@@ -694,6 +704,10 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
              "\tPUSHFRAME\n"
              "\tCALL toInt\n"
              "\tPOPFRAME\n"
+             "\tCREATEFRAME\n"
+             "\tPUSHFRAME\n"
+             "\tCALL -floorHelp\n"
+             "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n"
              "\tINT2FLOAT GF@-temp GF@-temp\n",
              snippet);
@@ -811,11 +825,14 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
                  snippet);
           free(snippet);
         } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
-          printf("\n\t# VALMEM\n"
-                 "\tCREATEFRAME\n"
+          printf("\tCREATEFRAME\n"
                  "\tPUSHS %s\n"
                  "\tPUSHFRAME\n"
                  "\tCALL toInt\n"
+                 "\tPOPFRAME\n"
+                 "\tCREATEFRAME\n"
+                 "\tPUSHFRAME\n"
+                 "\tCALL -floorHelp\n"
                  "\tPOPFRAME\n"
                  "\tPOPS GF@-temp\n"
                  "\tINT2FLOAT GF@-temp GF@-temp\n",
@@ -837,6 +854,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
     } else if (expr->as.expr.binary.lhs->type == AST_FUNC_CALL) {
       err = call_func(expr->as.expr.binary.lhs);
       CHECK_ERR_RET(err);
+      printf("\tCREATEFRAME\n");
 
       printf("\tPOPS GF@-tempLeft\n");
     } else {
@@ -888,8 +906,6 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
   char *snippet;
   IFJ_ERR err;
 
-  printf("\tCREATEFRAME\n");
-
   for (size_t i = 0; i < func_call->as.func_call.param_lists_cnt; i++) {
     ast_node_t *param_list = func_call->as.func_call.param_lists[i];
 
@@ -910,6 +926,7 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
         printf("\tPUSHS GF@-temp\n");
       } else if (param->type == AST_FUNC_CALL) {
         err = call_func(param);
+        // printf("\tCREATEFRAME\n");
         CHECK_ERR_RET(err);
       } else {
         LOG_ERR(IFJ_EINTERNAL, "Unknown parameter type");
@@ -917,6 +934,7 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
       }
     }
   }
+  printf("\tCREATEFRAME\n");
   printf("\tPUSHFRAME\n");
   printf("\tCALL %s\n", func_call->as.func_call.id);
   printf("\tPOPFRAME\n");
@@ -1350,11 +1368,12 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
   ast_node_t *body = for_loop->as.for_st.body;
   ast_node_t *gen = for_loop->as.for_st.gen;
   ast_node_t *range = gen->as.for_gen.range;
-  // ast_node_t *step = range->as.for_range.by_expr;
 
   // definování vnořených proměnných cyklů
   printf("\n\t# Definition of loop variables\n");
   err = define_loop_var(gen);
+  CHECK_ERR_RET(err);
+  err = define_local_vars(body);
   CHECK_ERR_RET(err);
 
   printf("\tDEFVAR LF@-forHelp2-%d\n", id);
@@ -1369,15 +1388,23 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
       err = get_snippet(range->as.for_range.expr, &snippet);
       CHECK_ERR_RET(err);
 
+      printf("\tDEFVAR LF@-forHelp%d\n", id);
       if (!range->as.for_range.until) {
-        printf("\tDEFVAR LF@-forHelp%d\n", id);
         printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
+        printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+        printf("\tJUMPIFEQ -forDescendingBefore%d GF@-temp bool@true\n", id);
+
+      } else {
+        printf("\tMOVE LF@-forHelp%d %s\n", id, snippet);
       }
+
+      // podmínky
+      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
 
       free(snippet);
 
       printf("\nLABEL -for%d\n", id);
-
       printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
       break;
 
@@ -1385,23 +1412,37 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
       err = get_snippet(range->as.for_range.expr, &snippet);
       CHECK_ERR_RET(err);
 
+      printf("\tDEFVAR LF@-forHelp%d\n", id);
       if (!range->as.for_range.until) {
-        printf("\tADD %s %s int@1\n", snippet, snippet);
+        printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
+      } else {
+        printf("\tMOVE LF@-forHelp%d %s\n", id, snippet);
       }
 
-      printf("\nLABEL -for%d\n", id);
+      // podmínky
+      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
 
-      printf("\tLT GF@-temp LF@%s %s\n", loop_var, snippet);
       free(snippet);
+
+      printf("\nLABEL -for%d\n", id);
+      printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
       break;
 
     case AST_EXPR:
       err = calc_expression(range->as.for_range.expr);
       CHECK_ERR_RET(err);
 
+      printf("\tDEFVAR LF@-forHelp%d\n", id);
       if (!range->as.for_range.until) {
-        printf("\tADD GF@-temp GF@-temp int@1\n");
+        printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
+      } else {
+        printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
       }
+
+      // podmínky
+      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
 
       printf("\nLABEL -for%d\n", id);
 
@@ -1414,9 +1455,16 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
 
       printf("\tPOPS GF@-temp\n");
 
+      printf("\tDEFVAR LF@-forHelp%d\n", id);
       if (!range->as.for_range.until) {
-        printf("\tADD GF@-temp GF@-temp int@1\n");
+        printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
+      } else {
+        printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
       }
+
+      // podmínky
+      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
 
       printf("\nLABEL -for%d\n", id);
 
@@ -1429,9 +1477,16 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
 
       printf("\tPOPS GF@-temp\n");
 
+      printf("\tDEFVAR LF@-forHelp%d\n", id);
       if (!range->as.for_range.until) {
-        printf("\tADD GF@-temp GF@-temp int@1\n");
+        printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
+      } else {
+        printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
       }
+
+      // podmínky
+      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
 
       printf("\nLABEL -for%d\n", id);
 
@@ -1448,8 +1503,16 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
   }
 
   printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
+  printf("\tJUMP -forGuards%d\n", id);
+
+  printf("\nLABEL -forDescendingBefore%d\n", id);
+  printf("\tSUB LF@-forHelp%d LF@-forHelp%d int@2\n", id, id);
+  printf("\nLABEL -forDescending%d\n", id);
+  printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+  printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
 
   printf("\t# Guards\n");
+  printf("\nLABEL -forGuards%d\n", id);
   for (size_t i = 0; i < for_loop->as.for_st.guards_cnt; i++) {
     ast_node_t *guard = for_loop->as.for_st.guards[i];
 
@@ -1555,11 +1618,14 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
     printf("\n\tADD LF@%s LF@%s int@1\n", loop_var, loop_var);
   }
 
+  printf("\tJUMPIFEQ -error LF@%s LF@-forHelp2-%d\n", loop_var, id);
+
   printf("\tGT GF@-temp LF@%s LF@-forHelp2-%d\n", loop_var, id);
-  printf("\tJUMPIFEQ -error GF@-temp bool@false\n");
+  printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@false\n", id);
+
   printf("\tJUMP -for%d\n", id);
 
-  printf("\nLABEL -forEnd%d\n", id);
+  printf("\nLABEL -forEnd%d\n\n", id);
 
   return IFJ_SUCCESS;
 }
