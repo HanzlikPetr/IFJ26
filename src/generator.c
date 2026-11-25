@@ -46,7 +46,6 @@ static IFJ_ERR define_var(ast_node_t *def);
 static IFJ_ERR condition(ast_node_t *if_st);
 
 static IFJ_ERR start_code(ast_node_t *root) {
-  // CHECK_ARG_NULL_RET(root); // redundant
   puts(".IFJcode26");
 
   printf("\n\t# Initialization of global variables\n");
@@ -499,12 +498,6 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       }
     }
 
-    if (left->inferred_type.type == TYPE_UNIT) {
-      // datový typ nil se může porovnávat pouze s nil
-      *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n";
-      break;
-    }
-
     *snippet =
         "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n\tLT "
         "GF@-temp GF@-tempLeft GF@-tempRight\n\tPOPS GF@-tempLeft\n\tOR "
@@ -513,7 +506,10 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_GEQ:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (left->inferred_type.type + right->inferred_type.type > 1) {
+      if (!(left->inferred_type.type == TYPE_INT &&
+            right->inferred_type.type == TYPE_DOUBLE ||
+            left->inferred_type.type == TYPE_DOUBLE &&
+            right->inferred_type.type == TYPE_INT)) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -523,12 +519,6 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       } else {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
-    }
-
-    if (left->inferred_type.type == TYPE_UNIT) {
-      // datový typ nil se může porovnávat pouze s nil
-      *snippet = "\tEQ GF@-temp GF@-tempLeft GF@-tempRight\n\tPUSHS GF@-temp\n";
-      break;
     }
 
     *snippet =
@@ -573,7 +563,10 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_SUB:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (left->inferred_type.type + right->inferred_type.type > 1) {
+      if (!(left->inferred_type.type == TYPE_INT &&
+            right->inferred_type.type == TYPE_DOUBLE ||
+            left->inferred_type.type == TYPE_DOUBLE &&
+            right->inferred_type.type == TYPE_INT)) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -593,7 +586,10 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_MUL:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (left->inferred_type.type + right->inferred_type.type > 1) {
+      if (!(left->inferred_type.type == TYPE_INT &&
+            right->inferred_type.type == TYPE_DOUBLE ||
+            left->inferred_type.type == TYPE_DOUBLE &&
+            right->inferred_type.type == TYPE_INT)) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -613,7 +609,10 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_DIV:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (left->inferred_type.type + right->inferred_type.type > 1) {
+      if (!(left->inferred_type.type == TYPE_INT &&
+            right->inferred_type.type == TYPE_DOUBLE ||
+            left->inferred_type.type == TYPE_DOUBLE &&
+            right->inferred_type.type == TYPE_INT)) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -753,7 +752,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
   if (expr->as.expr.is_unary) {
     if (expr->as.expr.operator_type != TOK_NOT &&
         expr->as.expr.operator_type != TOK_SUB) {
-      printf("%d", expr->as.expr.operator_type);
+      LOG_ERR(IFJ_EINTERNAL, "Unknown unary operator: %d", expr->as.expr.operator_type);
       return IFJ_EINTERNAL;
     }
 
@@ -894,7 +893,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
     err = get_op(expr, (const char **)&snippet);
     CHECK_ERR_RET(err);
 
-    printf(snippet);
+    printf("%s", snippet);
   }
 
   return IFJ_SUCCESS;
@@ -1195,7 +1194,7 @@ static IFJ_ERR define_local_vars(ast_node_t *body) {
 }
 
 static IFJ_ERR while_loop(ast_node_t *while_st) {
-  CHECK_ARG_NULL_RET(while_loop);
+  CHECK_ARG_NULL_RET(while_st);
   IFJ_ERR err;
   char *snippet;
   static int last_id = 0;
@@ -1381,7 +1380,6 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
   char *loop_var = gen->as.for_gen.id;
 
   if (range != NULL) {
-    // char *operace = include ? JUMPIFGEQ : JUPIFGT; - pak %s v porovnavanich
     printf("\t# Condition\n");
     switch (range->as.for_range.expr->type) {
     case AST_LITERAL:
@@ -1638,9 +1636,11 @@ static IFJ_ERR ret_st(ast_node_t *func_ret) {
   if (func_ret->as.func_ret.rhs) {
     ast_node_type_t type = func_ret->as.func_ret.rhs->type;
     if (type == AST_FUNC_CALL) {
-      generate_instruction(func_ret->as.func_ret.rhs);
+      err = generate_instruction(func_ret->as.func_ret.rhs);
+      CHECK_ERR_RET(err);
     } else if (type == AST_EXPR) {
-      generate_instruction(func_ret->as.func_ret.rhs);
+      err = generate_instruction(func_ret->as.func_ret.rhs);
+      CHECK_ERR_RET(err);
       printf("\tPUSHS GF@-temp\n");
     } else {
       err = get_snippet(func_ret->as.func_ret.rhs, &snippet);
