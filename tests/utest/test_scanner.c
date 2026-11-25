@@ -299,13 +299,13 @@ static void test_identifier_underscore(void **state) {
 }
 
 /**
- * @brief Samotné podtržítko není identifikátor.
+ * @brief Samotné podtržítko je samostatný token, ne identifikátor.
  */
 static void test_lone_underscore(void **state) {
   (void)state;
-  expect_error("_", 0, IFJ_ELEX);
-  expect_error("_ x", 0, IFJ_ELEX);
-  expect_error("x _", 1, IFJ_ELEX);
+  EXPECT("_", TOK_UNDERSCORE, TOK_EOL, TOK_EOF);
+  EXPECT("_ x", TOK_UNDERSCORE, TOK_ID, TOK_EOL, TOK_EOF);
+  EXPECT("x _", TOK_ID, TOK_UNDERSCORE, TOK_EOL, TOK_EOF);
 }
 
 /**

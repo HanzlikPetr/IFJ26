@@ -86,12 +86,13 @@ typedef enum {
   TOK_LARROW,     // <-
   TOK_ANNOT_MAIN, // @main
 
-  TOK_INDENT, // začátek odsazení
-  TOK_DEDENT, // konec odsazení
+  TOK_INDENT,     // začátek odsazení
+  TOK_DEDENT,     // konec odsazení
+  TOK_UNDERSCORE, // samotné "_"
   // Pozn.: Skener následující tři typy NIKDY nevydá - slouží pouze jako
   // značky operátorů při konstrukci AST v psa.c.
-  TOK_NULL, // unit literál "()" - pouze značka v AST
-  TOK_TO, // operátor "to" - pouze značka v AST
+  TOK_NULL,  // unit literál "()" - pouze značka v AST
+  TOK_TO,    // operátor "to" - pouze značka v AST
   TOK_UNTIL, // operátor "until" - pouze značka v AST
 } token_type_t;
 
