@@ -30,6 +30,7 @@
 #include "error.h"
 #include "parser.h"
 #include "psa.h"
+#include "scanner.h"
 
 /**
  * @brief Načte další token do parseru.
@@ -606,7 +607,7 @@ static IFJ_ERR parse_func_ret_opt(parser_t *parser, ast_node_t **rhs) {
   CHECK_ARGS_NULL_RET(parser, rhs);
 
   *rhs = NULL;
-  if (parser_is_type(parser, TOK_EOL)) {
+  if (parser_is_type(parser, TOK_EOL) || parser_is_keyword(parser, KW_ELSE)) {
     return IFJ_SUCCESS;
   }
 
