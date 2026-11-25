@@ -899,9 +899,20 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                    dot_identifier != NULL &&
                    strcmp(dot_identifier, "toString") == 0;
 
-  if ((lhs_type->type == TYPE_UNIT && !unit_to_string) ||
-      rhs_type->type == TYPE_UNIT) {
-    CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Unit type in binary operation.");
+  // Unit lze porovnávat pouze operátory == a !=, a to výhradně s Unit.
+  // Všechny ostatní binární/relační operace s Unit jsou zakázané. Výjimkou
+  // zůstává volání Unit.toString, které se ověřuje níže.
+  if (lhs_type->type == TYPE_UNIT || rhs_type->type == TYPE_UNIT) {
+    bool is_equality = expr_node->as.expr.operator_type == TOK_EQ ||
+                       expr_node->as.expr.operator_type == TOK_NEQ;
+    bool both_unit = lhs_type->type == TYPE_UNIT && rhs_type->type == TYPE_UNIT;
+    bool unit_to_string_access = unit_to_string &&
+                                 lhs_type->type == TYPE_UNIT &&
+                                 rhs_type->type != TYPE_UNIT;
+
+    if (!(is_equality && both_unit) && !unit_to_string_access) {
+      CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Unit type in binary operation.");
+    }
   }
 
   if (expr_node->as.expr.operator_type == TOK_CONCAT) {
