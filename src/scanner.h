@@ -139,6 +139,8 @@ typedef struct {
   bool has_peeked;
   /** Načtený token přes peek. */
   token_t peeked;
+  /** Poslední token byl středník (už vrácený jako EOL). */
+  bool after_semicolon;
 } scanner_t;
 
 /**

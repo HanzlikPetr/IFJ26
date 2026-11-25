@@ -1,0 +1,34 @@
+--------PRINT--------
+5
+0x1p-1
+Hello world
+()
+true
+false
+--------READLINE--------
+ahoj
+ahoj2
+--------READINT--------
+HODNOTA INTEGER: 10
+20
+--------READDOUBLE--------
+HODNOTA DOUBLE: 0x1.54ee392e1ef74p-3
+0x1.e77ced916872bp+3
+--------TOSTR--------
+0.17
+10
+()
+--------TOINT--------
+0
+1
+--------STRLENGTH--------
+4
+--------SUBSTR--------
+ho
+--------ORD--------
+97
+-1
+-1
+--------CHR--------
+a
+b

@@ -1,0 +1,7 @@
+List(3, 4, 5)
+head: 3
+index 1: 4
+tail: List(4, 5)
+empty: List()
+range: List(5, 3, 1)
+sum: 14

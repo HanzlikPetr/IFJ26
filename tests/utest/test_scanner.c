@@ -213,8 +213,8 @@ static void test_unknown_chars(void **state) {
 static void test_single_char_tokens(void **state) {
   (void)state;
   EXPECT("( ) [ ] , : ; * - /", TOK_LPAREN, TOK_RPAREN, TOK_LBRACKET,
-         TOK_RBRACKET, TOK_COMMA, TOK_COLON, TOK_SEMICOLON, TOK_MUL, TOK_SUB,
-         TOK_DIV, TOK_EOL, TOK_EOF);
+         TOK_RBRACKET, TOK_COMMA, TOK_COLON, TOK_EOL, TOK_MUL, TOK_SUB, TOK_DIV,
+         TOK_EOL, TOK_EOF);
 }
 
 /**
@@ -1120,6 +1120,20 @@ static void test_peek_errors(void **state) {
   close_scanner(f);
 }
 
+/**
+ * @brief Středník vrací EOL, za ním na konci řádku se druhý EOL nepošle.
+ */
+static void test_semicolon(void **state) {
+  (void)state;
+  EXPECT("a; b", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
+  EXPECT("a;\nb", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
+  EXPECT("a;  // k\nb", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
+  EXPECT("a;", TOK_ID, TOK_EOL, TOK_EOF);
+  EXPECT("a; /* x\n */\nb", TOK_ID, TOK_EOL, TOK_ID, TOK_EOL, TOK_EOF);
+  EXPECT("a\n  b;\nc", TOK_ID, TOK_EOL, TOK_INDENT, TOK_ID, TOK_EOL, TOK_DEDENT,
+         TOK_ID, TOK_EOL, TOK_EOF);
+}
+
 int main(void) {
   const struct CMUnitTest tests[] = {
       // Inicializace
@@ -1200,6 +1214,7 @@ int main(void) {
       cmocka_unit_test(test_peek_same_token),
       cmocka_unit_test(test_peek_then_destroy),
       cmocka_unit_test(test_peek_errors),
+      cmocka_unit_test(test_semicolon),
   };
   return cmocka_run_group_tests(tests, NULL, NULL);
 }

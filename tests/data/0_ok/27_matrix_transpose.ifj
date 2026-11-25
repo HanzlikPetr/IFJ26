@@ -1,0 +1,11 @@
+// transpozice matice 2x3 (na vstupu [[1 2 3], [4 5 6]] -> [[1 4], [2 5], [3 6]]
+import ifj26.*
+
+def printTransposed(row0: List[Int])(row1: List[Int]): Unit =
+    for c <- 0 until 3 do
+        print(row0(c).toString + " " + row1(c).toString + "\n")
+
+@main def main(): Unit =
+    val row0: List[Int] = List(readInt(), readInt(), readInt())
+    val row1: List[Int] = List(readInt(), readInt(), readInt())
+    printTransposed(row0)(row1)

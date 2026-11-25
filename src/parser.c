@@ -3,22 +3,22 @@
  * @brief IFJ26 - Implementace rekurzivního syntaktického analyzátoru
  *
  * @author xgleton00 Ondřej Glet
+ * @author xhanzlp00 Petr Hanzlík
  *
- * Podporu if výrazu vygeneroval AI asistent (agent OpenCode) podle
- * tohoto zadání: když token je klíčové slovo if, vytvoř uzel AST_IF;
- * za if musí být podmínka zpracovaná process_expression, poté
- * klíčové slovo then, za ním větev then opět process_expression,
- * dále povinné else s větví else. Výsledkem je neterminál E na
- * zásobníku PSA, takže if výraz může být operandem libovolného
- * výrazu. Duplicitní logika z parser.c byla odstraněna, parser.c
+ * Podporu if výrazu vygeneroval AI asistent (agent OpenCode, model: GLM-5.3)
+ * podle tohoto zadání: "když token je klíčové slovo if, vytvoř uzel AST_IF; za
+ * if musí být podmínka zpracovaná process_expression, poté klíčové slovo then,
+ * za ním větev then opět process_expression, dále povinné else s větví else.
+ * Výsledkem je neterminál E na zásobníku PSA, takže if výraz může být operandem
+ * libovolného výrazu". Duplicitní logika z parser.c byla odstraněna, parser.c
  * nyní na PSA deleguje (uzel AST_IF vzniká v obou souborech - viz
  * poznámka v parser.c a smlouva v psa.h).
  *
  * Podporu blokových těl větší if výrazu (rozšíření CONTROL, varianty
  * s těly větví na dalších řádcích s odsazením) také vygeneroval AI
- * asistent (agent OpenCode) podle tohoto zadání: tělo větve zapsané
- * na dalším řádku s odsazením se zpracuje jako blok příkazů funkcí
- * parse_block. Protože blok větve else spotřebuje i EOL posledního
+ * asistent (agent OpenCode, model: GLM-5.3) podle tohoto zadání: "tělo větve
+ * zapsané na dalším řádku s odsazením se zpracuje jako blok příkazů funkcí
+ * parse_block". Protože blok větve else spotřebuje i EOL posledního
  * řádku a DEDENT, vkládá se za něj syntetický EOL a skutečný token
  * za ním se vrací do scanneru novou funkcí scanner_unread_token
  * (podrobnosti viz parse_if_expr_push_eol).
@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "error.h"
 #include "parser.h"
 #include "psa.h"
 
@@ -313,9 +314,17 @@ static IFJ_ERR parse_type_id(parser_t *parser, ifj26_type_t *type) {
       !parser_is_keyword(parser, KW_STRING) &&
       !parser_is_keyword(parser, KW_UNIT) &&
       !parser_is_keyword(parser, KW_BOOLEAN)) {
-    LOG_ERR(IFJ_ESEM_UNDEF, "Expected type on line %d",
+    if (parser_is_type(parser, TOK_ID)) {
+      LOG_ERR(IFJ_ESEM_UNDEF, "Undefined type '%s' on line %d",
+              parser->current_token.value.str_value,
+              parser->current_token.line);
+      return IFJ_ESEM_UNDEF;
+    }
+
+    LOG_ERR(IFJ_ESYNTAX, "Expected type on line %d",
             parser->current_token.line);
-    return IFJ_ESEM_UNDEF;
+
+    return IFJ_ESYNTAX;
   }
 
   switch (parser->current_token.value.keyword) {
@@ -406,9 +415,6 @@ static IFJ_ERR parse_param_next(parser_t *parser, ast_node_t *param_list) {
   while (parser_is_type(parser, TOK_COMMA)) {
     CHECK_ERR_RET(parser_next(parser));
 
-    /* A trailing comma is valid only before a closing parenthesis on a
-     * later physical line.  Newlines inside parentheses are otherwise
-     * whitespace, so the scanner records this on the ')' token. */
     if (parser_is_type(parser, TOK_RPAREN)) {
       if (!parser->current_token.newline_before) {
         return IFJ_ESYNTAX;

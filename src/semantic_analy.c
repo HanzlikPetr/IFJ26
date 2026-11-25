@@ -886,6 +886,7 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
                                             ifj26_type_t *result_type,
                                             char *dot_identifier) {
   CHECK_ARGS_NULL_RET(expr_node, lhs_type, rhs_type, result_type);
+  bool unit_to_string;
 
   if (expr_node->type != AST_EXPR || expr_node->as.expr.is_unary) {
     LOG_ERR(IFJ_EINTERNAL,
@@ -894,7 +895,12 @@ static IFJ_ERR check_binary_operation_types(ast_node_t *expr_node,
     return IFJ_EINTERNAL;
   }
 
-  if (lhs_type->type == TYPE_UNIT || rhs_type->type == TYPE_UNIT) {
+  unit_to_string = expr_node->as.expr.operator_type == TOK_DOT &&
+                   dot_identifier != NULL &&
+                   strcmp(dot_identifier, "toString") == 0;
+
+  if ((lhs_type->type == TYPE_UNIT && !unit_to_string) ||
+      rhs_type->type == TYPE_UNIT) {
     CHECK_ERR_LOG_RET(IFJ_ESEM_TYPE, "Unit type in binary operation.");
   }
 
@@ -1139,6 +1145,26 @@ static IFJ_ERR check_if_branch(sem_ctx_t *ctx, ast_node_t *branch,
 }
 
 /**
+ * @brief Zjistí, zda větev končí příkazem return (a tedy nevrací hodnotu).
+ * @param branch AST uzel větve (blok nebo přímo return).
+ * @return true, pokud poslední příkaz větve je return.
+ */
+static bool branch_ends_with_return(const ast_node_t *branch) {
+  if (branch == NULL) {
+    return false;
+  }
+  if (branch->type == AST_FUNC_RET) {
+    return true;
+  }
+  if (branch->type != AST_BLOCK || branch->as.block.commands_cnt == 0) {
+    return false;
+  }
+  const ast_node_t *last =
+      branch->as.block.commands[branch->as.block.commands_cnt - 1];
+  return last != NULL && last->type == AST_FUNC_RET;
+}
+
+/**
  * @brief Pomocná funkce pro kontrolu if použitého jako výraz (musí mít větev
  *        else; typem výrazu je sjednocený typ větví then, else if a else,
  *        přičemž se aplikuje implicitní konverze Int na Double). Chybí-li
@@ -1180,6 +1206,7 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   // Sjednocení typů všech větví; výsledkem je typ první větve, pokud jsou
   // kompatibilní, jinak typ pozdější větve (implicitní konverze Int na Double)
   ifj26_type_t unified_type = branch_type;
+  bool unified_is_never = branch_ends_with_return(if_node->as.if_st.body);
 
   for (size_t i = 0; i < if_node->as.if_st.else_if_cnt; i++) {
     if (if_node->as.if_st.else_if[i] == NULL) {
@@ -1196,6 +1223,17 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
     err = check_if_branch(ctx, if_node->as.if_st.else_if[i]->as.else_if_st.body,
                           &branch_type);
     CHECK_ERR_LOG_RET(err, "Failed to check else if branch in if statement.");
+
+    // Větev končící return nevrací hodnotu, proto se sjednocení typů neúčastní.
+    if (branch_ends_with_return(
+            if_node->as.if_st.else_if[i]->as.else_if_st.body)) {
+      continue;
+    }
+    if (unified_is_never) {
+      unified_type = branch_type;
+      unified_is_never = false;
+      continue;
+    }
 
     if (!types_compatible(&unified_type, &branch_type)) {
       if (!types_compatible(&branch_type, &unified_type)) {
@@ -1214,7 +1252,11 @@ static IFJ_ERR check_if_expr(sem_ctx_t *ctx, ast_node_t *if_node,
   err = check_if_branch(ctx, if_node->as.if_st.else_st, &branch_type);
   CHECK_ERR_LOG_RET(err, "Failed to check else block in if statement.");
 
-  if (!types_compatible(&unified_type, &branch_type)) {
+  if (branch_ends_with_return(if_node->as.if_st.else_st)) {
+    // else větev končí return, nevrací hodnotu
+  } else if (unified_is_never) {
+    unified_type = branch_type;
+  } else if (!types_compatible(&unified_type, &branch_type)) {
     if (!types_compatible(&branch_type, &unified_type)) {
       CHECK_ERR_LOG_RET(
           IFJ_ESEM_TYPE,
@@ -1295,7 +1337,7 @@ static IFJ_ERR check_list_method_call(sem_ctx_t *ctx, ast_node_t *expr_node,
     bool is_slice = strcmp(method_id, "slice") == 0;
 
     if (!is_drop_take && !is_slice) {
-      CHECK_ERR_LOG_RET(IFJ_ESEM_UNDEF,
+      CHECK_ERR_LOG_RET(IFJ_ESEM_ARGS,
                         "Unknown method '%s' called with parameters via dot "
                         "operator.",
                         method_id);
@@ -1574,7 +1616,7 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
       IFJ_ERR var_err =
           search_variable_in_stack(ctx, expr_node->as.func_call.id, &var_data);
 
-      if (var_err != IFJ_ESEM_UNDEF && CHECK_ERR(var_err)) {
+      if (CHECK_ERR(var_err)) {
         LOG_ERR(var_err, "Failed to search variable '%s' in local scopes.",
                 expr_node->as.func_call.id);
         return var_err;
@@ -1758,6 +1800,12 @@ static IFJ_ERR check_expr(sem_ctx_t *ctx, ast_node_t *expr_node,
           }
 
           *result_type = func_data->func.return_type;
+        } else if (func_err == IFJ_SUCCESS && func_data->is_function) {
+          CHECK_ERR_LOG_RET(
+              IFJ_ESEM_ARGS,
+              "Function '%s' called with incorrect number of paramlists. "
+              "Expected %ld, got 0.",
+              expr_node->as.var.id, func_data->func.param_list_count);
         } else {
           LOG_ERR(IFJ_ESEM_UNDEF,
                   "Variable or parameterless function '%s' not found in "
