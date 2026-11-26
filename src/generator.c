@@ -114,6 +114,9 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\nLABEL -printNil\n"
          "\tWRITE string@()\n"
          "\nLABEL -endPrint\n"
+
+         // Návratová hodnota.
+         "\tPUSHS int@0\n"
          "\tRETURN\n\n");
 
   // Funkce readLine.
@@ -1138,7 +1141,7 @@ static IFJ_ERR assign(ast_node_t *assign) {
   case AST_IF:
     err = condition(assign->as.assign.rhs);
     CHECK_ERR_RET(err);
-    printf("\tPOPS LF@%s\n", assign->as.assign.id);
+    printf("\tMOVE LF@%s LF@-return\n", assign->as.assign.id);
     break;
 
   case AST_FUNC_CALL:
@@ -1342,7 +1345,7 @@ static IFJ_ERR define_var(ast_node_t *def) {
       } else if (def->as.def.rhs->type == AST_IF) {
         err = condition(def->as.def.rhs);
         CHECK_ERR_RET(err);
-        printf("\tPOPS LF@%s\n", def->as.def.id);
+        printf("\tMOVE LF@%s LF@-return\n", def->as.def.id);
       }
 
       return IFJ_SUCCESS;
@@ -1502,7 +1505,7 @@ static IFJ_ERR define_loop_var(ast_node_t *gen) {
         } else if (gen->as.for_gen.expr->type == AST_IF) {
           err = condition(gen->as.for_gen.expr);
           CHECK_ERR_RET(err);
-          printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
+          printf("\tMOVE LF@%s LF@-return\n", gen->as.for_gen.id);
         }
       }
 
@@ -1541,7 +1544,7 @@ static IFJ_ERR define_loop_var(ast_node_t *gen) {
   case AST_IF:
     err = condition(gen->as.for_gen.expr);
     CHECK_ERR_RET(err);
-    printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
+    printf("\tMOVE LF@%s LF@-return\n", gen->as.for_gen.id);
     break;
 
   case AST_FUNC_CALL:
@@ -1653,7 +1656,7 @@ static IFJ_ERR for_loop_range(ast_node_t *range, char *loop_var, int id) {
   case AST_IF:
     err = condition(range->as.for_range.expr);
     CHECK_ERR_RET(err);
-    printf("\tPOPS GF@-temp\n");
+    printf("\tMOVE GF@-temp LF@-return\n");
     // Definice hraniční proměnné.
     printf("\tDEFVAR LF@-forHelp%d\n", id);
     if (!range->as.for_range.until) {
@@ -1728,7 +1731,7 @@ static IFJ_ERR for_loop_guards(ast_node_t *for_loop, int id) {
       err = condition(guard->as.for_guard.expr);
       CHECK_ERR_RET(err);
 
-      printf("\tPOPS GF@-temp\n");
+      printf("\tMOVE GF@-temp LF@-return\n");
       printf("\n\tJUMPIFEQ -forSkip%d GF@-temp bool@false\n", id);
       break;
 
@@ -1790,7 +1793,7 @@ static IFJ_ERR for_loop_step(ast_node_t *range, char *loop_var) {
       err = condition(range->as.for_range.by_expr);
       CHECK_ERR_RET(err);
 
-      printf("\tPOPS GF@-temp\n");
+      printf("\tMOVE GF@-temp LF@-return\n");
       printf("\n\tADD LF@%s LF@%s GF@-temp\n", loop_var, loop_var);
       break;
 
@@ -2084,7 +2087,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = calc_expression(instruction);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS GF@-temp\n");
+    printf("\tMOVE LF@-return GF@-temp\n");
     break;
 
   case AST_VAR:
@@ -2092,7 +2095,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);
+    printf("\tMOVE LF@-return %s\n", snippet);
     free(snippet);
     break;
 
@@ -2101,7 +2104,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
 
-    printf("\tPUSHS %s\n", snippet);
+    printf("\tMOVE LF@-return %s\n", snippet);
     free(snippet);
     break;
 
@@ -2126,6 +2129,8 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   case AST_FUNC_CALL:
     err = call_func(instruction);
     CHECK_ERR_RET(err);
+
+    printf("\tPOPS LF@-return\n");
     break;
 
   default:
@@ -2191,6 +2196,9 @@ static IFJ_ERR generate_function(ast_node_t *function) {
 
   printf("LABEL %s\n", function->as.func.id);
 
+  // Speciální lokální proměnná pro návratovou hodnotu.
+  printf("\tDEFVAR LF@-return\n");
+
   // Lokální kopie parametrů.
   if (function->as.func.param_lists != NULL) {
     printf("\t#Local copies of parameters\n");
@@ -2210,6 +2218,9 @@ static IFJ_ERR generate_function(ast_node_t *function) {
   err = generate_body(function->as.func.body);
   CHECK_ERR_GOTO(err, cleanup);
 
+  if (!function->as.func.main) {
+    printf("\tPUSHS LF@-return\n");
+  }
   printf("\tRETURN\n\n");
 
   // Destrukce pole jmen lokálních proměnných.
