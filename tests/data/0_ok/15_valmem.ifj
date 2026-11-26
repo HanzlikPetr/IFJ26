@@ -1,10 +1,13 @@
 // Spravny program: VALMEM - cteni clenu hodnot teckovou notaci (spec 5.4)
 import ifj26.*
 
+def getAnswer(): Int = 42
+
 @main def main(): Unit =
   val text = "abc"
   val number = 2.9
   val answer = 42
+  val flag = true
   print(text.length)
   print("\n")
   print(number.toInt)
@@ -14,4 +17,31 @@ import ifj26.*
   print(number.toString)
   print("\n")
   print(answer.toString)
+  print("\n")
+  // VALMEM na obecnych vyrazech, ne jen na promenne nebo literalu
+  print((-answer).toString)
+  print("\n")
+  print((!flag).toString)
+  print("\n")
+  print((answer + 1).toString)
+  print("\n")
+  print((answer + answer).toString)
+  print("\n")
+  print((answer + (answer - 1)).toString)
+  print("\n")
+  print((answer > 0).toString)
+  print("\n")
+  print((!(answer > 0)).toString)
+  print("\n")
+  print((answer + 1).toString.length)
+  print("\n")
+  print(("ab" + "cd").length)
+  print("\n")
+  print((number + 1.1).toInt)
+  print("\n")
+  print((number + number).toInt)
+  print("\n")
+  print((number + number).floor.toInt)
+  print("\n")
+  print(getAnswer().toString)
   print("\n")
