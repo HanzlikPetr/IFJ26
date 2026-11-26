@@ -124,14 +124,24 @@ static IFJ_ERR start_code(ast_node_t *root) {
 
   // Funkce readInt.
   printf("LABEL readInt\n"
-         "\tREAD GF@-temp int\n"
-         "\tPUSHS GF@-temp\n"
+         "\tDEFVAR LF@value\n"
+         "\tREAD LF@value int\n"
+         "\tTYPE GF@-temp LF@value\n"
+         "\tJUMPIFNEQ -readIntSkip GF@-temp string@nil\n"
+         "\tMOVE LF@value int@0\n"
+         "\nLABEL -readIntSkip\n"
+         "\tPUSHS LF@value\n"
          "\tRETURN\n\n");
 
   // Funkce readDouble.
   printf("LABEL readDouble\n"
-         "\tREAD GF@-temp float\n"
-         "\tPUSHS GF@-temp\n"
+         "\tDEFVAR LF@value\n"
+         "\tREAD LF@value float\n"
+         "\tTYPE GF@-temp LF@value\n"
+         "\tJUMPIFNEQ -readDoubleSkip GF@-temp string@nil\n"
+         "\tMOVE LF@value float@0x0p+0\n"
+         "\nLABEL -readDoubleSkip\n"
+         "\tPUSHS LF@value\n"
          "\tRETURN\n\n");
 
   // Funkce toStr
@@ -342,8 +352,13 @@ static IFJ_ERR start_code(ast_node_t *root) {
 
   // Funkce readBoolean
   printf("LABEL readBoolean\n"
-         "\tREAD GF@-temp bool\n"
-         "\tPUSHS GF@-temp\n"
+         "\tDEFVAR LF@value\n"
+         "\tREAD LF@value bool\n"
+         "\tTYPE GF@-temp LF@value\n"
+         "\tJUMPIFNEQ -readBooleanSkip GF@-temp string@nil\n"
+         "\tMOVE LF@value bool@false\n"
+         "\nLABEL -readBooleanSkip\n"
+         "\tPUSHS LF@value\n"
          "\tRETURN\n\n");
 
   // Pomocná funkce -floorHelp
