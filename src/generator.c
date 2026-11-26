@@ -33,6 +33,7 @@ static IFJ_ERR generate_body(ast_node_t *body);
 static IFJ_ERR generate_instruction(ast_node_t *instruction);
 static IFJ_ERR define_var(ast_node_t *def);
 static IFJ_ERR condition(ast_node_t *if_st);
+static IFJ_ERR calc_expression(ast_node_t *expr);
 
 /**
  * @brief Konstruktor pro pole jmen lokálních proměnných.
@@ -856,9 +857,16 @@ static IFJ_ERR valmem(ast_node_t *expr) {
 
     return IFJ_SUCCESS;
   } else {
-    // Zřetězení VALMEM.
-    err = valmem(expr->as.expr.binary.lhs);
-    CHECK_ERR_RET(err);
+    // Vypočítání levé strany.
+    if (expr->as.expr.binary.lhs->as.expr.operator_type != TOK_DOT) {
+      err = calc_expression(expr->as.expr.binary.lhs);
+      CHECK_ERR_RET(err);
+
+    } else {
+      // Zřetězení VALMEM.
+      err = valmem(expr->as.expr.binary.lhs);
+      CHECK_ERR_RET(err);
+    }
 
     printf("\tCREATEFRAME\n");
     printf("\tPUSHS GF@-temp\n");
