@@ -5,28 +5,45 @@
  * @author xberanm00 Marek Beran
  */
 
-// --- libraries ---
+// --- knihovny ---
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// --- our files ---
+// --- naše soubory ---
 #include "generator.h"
-#include "printer_tree.h"
 
 // ==================== STRUKTURY ====================
+/**
+ * @brief Struktura pro uchování jmen lokálních proměnných.
+ */
 typedef struct {
-  char **data;
-  size_t size;
+  char **data;  /**< Pole jmen proměnných. */
+  size_t size;  /**< Velikost pole jmen. */
 } local_ids_t;
 
 local_ids_t local_ids;
 
 // ==================== POMOCNÉ FUNKCE ====================
+// Inicializace funkcí pro rekurzivní volání.
+static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet);
+static IFJ_ERR call_func(ast_node_t *func_call);
+static IFJ_ERR generate_body(ast_node_t *body);
+static IFJ_ERR generate_instruction(ast_node_t *instruction);
+static IFJ_ERR define_var(ast_node_t *def);
+static IFJ_ERR condition(ast_node_t *if_st);
 
+/**
+ * @brief Konstruktor pro pole jmen lokálních proměnných.
+ *
+ * @param local_ids Ukazatel na pole jmen lokálních proměnných.
+ * @return IFJ_SUCCESS při úspěchu, nebo chybový kód.
+ */
 static IFJ_ERR local_ids_ctor(local_ids_t *local_ids) {
-  // pole s hlavickou
+  CHECK_ARG_NULL_RET(local_ids);
+
+  // Pole s hlavičkou.
   local_ids->data = malloc(sizeof(char *) * 1);
   CHECK_MEM_ERR(local_ids->data);
 
@@ -36,16 +53,22 @@ static IFJ_ERR local_ids_ctor(local_ids_t *local_ids) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Destruktor pro pole jmen lokálních proměnných.
+ *
+ * @param local_ids Ukazatel na pole jmen lokálních proměnných.
+ */
 static void local_ids_dtor(local_ids_t *local_ids) { free(local_ids->data); }
 
-static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet);
-static IFJ_ERR call_func(ast_node_t *func_call);
-static IFJ_ERR generate_body(ast_node_t *body);
-static IFJ_ERR generate_instruction(ast_node_t *instruction);
-static IFJ_ERR define_var(ast_node_t *def);
-static IFJ_ERR condition(ast_node_t *if_st);
-
+/**
+ * @brief Vygeneruje kód, který bude součástí každého programu.
+ *
+ * @param root Ukazatel na kořen abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak IFJ_EINTERNAL.
+ */
 static IFJ_ERR start_code(ast_node_t *root) {
+  CHECK_ARG_NULL_RET(root);
+
   puts(".IFJcode26");
 
   printf("\n\t# Initialization of global variables\n");
@@ -53,7 +76,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
   printf("\tDEFVAR GF@-tempLeft\n");
   printf("\tDEFVAR GF@-tempRight\n\n");
 
-  // najde main funkci a zavolá jí
+  // Najde main funkci a zavolá jí.
   ast_node_t *function;
   for (size_t i = 0; i < root->as.root.funcs_cnt; i++) {
     function = root->as.root.funcs[i];
@@ -63,20 +86,23 @@ static IFJ_ERR start_code(ast_node_t *root) {
     }
 
     if (function->as.func.main) {
-      // zavolání main
+      // Zavolání main funkce.
       printf("\t# Run main\n");
       printf("\tCREATEFRAME\n");
       printf("\tPUSHFRAME\n");
       printf("\tCALL %s\n", function->as.func.id);
-      printf("\tEXIT int@0\n\n");   // úspěšné ukončení programu
+      printf("\tEXIT int@0\n\n");   // Úspěšné ukončení programu.
     }
   }
 
+  // Návěští pro chybový stav.
   printf("LABEL -error\n"
          "\tEXIT int@40\n");
 
+  // Vestavěné funkce.
   printf("\n\t# Built-in functions\n");
 
+  // Funkce print.
   printf("LABEL print\n"
          "\tDEFVAR LF@symb\n"
          "\tPOPS LF@symb\n"
@@ -89,32 +115,40 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\nLABEL -endPrint\n"
          "\tRETURN\n\n");
 
+  // Funkce readLine.
   printf("LABEL readLine\n"
          "\tREAD GF@-temp string\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce readInt.
   printf("LABEL readInt\n"
          "\tREAD GF@-temp int\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce readDouble.
   printf("LABEL readDouble\n"
          "\tREAD GF@-temp float\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce toStr
   printf("LABEL toStr\n"
          "\tDEFVAR LF@type\n"
          "\tPOPS GF@-temp\n"
          "\tTYPE LF@type GF@-temp\n"
+
+         // Zjištění typu parametru.
          "\tJUMPIFEQ -toStrEnd LF@type string@string\n"
          "\tJUMPIFEQ -toStrInt LF@type string@int\n"
          "\tJUMPIFEQ -toStrFloat LF@type string@float\n"
          "\tJUMPIFEQ -toStrNil LF@type string@nil\n"
-         // je to bool
+
+         // Parametr je type Bool.
          "\tJUMPIFEQ -toStrTrue GF@-temp bool@true\n"
 
+         // Přetypování parametru na typ String.
          "\n\tMOVE GF@-temp string@false\n"
          "\tJUMP -toStrEnd\n"
 
@@ -133,23 +167,28 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\nLABEL -toStrFloat\n"
          "\tFLOAT2STR GF@-temp GF@-temp\n"
 
+          // Vrácení z funkce.
          "\nLABEL -toStrEnd\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce toInt.
   printf("LABEL toInt\n"
          "\tPOPS GF@-temp\n"
          "\tFLOAT2INT GF@-temp GF@-temp\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce strLenght.
   printf("LABEL strLength\n"
          "\tPOPS GF@-temp\n"
          "\tSTRLEN GF@-temp GF@-temp\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce subStr.
   printf("LABEL subStr\n"
+          // Vytvoření lokálních kopií parametrů.
          "\t#Local copies of parameters\n"
          "\tDEFVAR LF@end$0\n"
          "\tPOPS LF@end$0\n"
@@ -157,6 +196,8 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS LF@start$0\n"
          "\tDEFVAR LF@value$0\n"
          "\tPOPS LF@value$0\n"
+
+         // Definice lokálních proměnných.
          "\n\t# Definition of local variables\n"
          "\tDEFVAR LF@len$1\n"
          "\tDEFVAR LF@res$1\n"
@@ -167,6 +208,8 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tCALL strLength\n"
          "\tPOPFRAME\n"
          "\tPOPS LF@len$1\n"
+
+         // Podmínky funkce.
          "\nLABEL -subStrConditions\n"
          "\tMOVE GF@-tempLeft LF@start$0\n"
          "\tPUSHS GF@-tempLeft\n"
@@ -176,6 +219,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS GF@-tempLeft\n"
          "\n\tLT GF@-temp GF@-tempLeft GF@-tempRight\n"
          "\tJUMPIFEQ -error GF@-temp bool@true\n"
+
          "\tMOVE GF@-tempLeft LF@end$0\n"
          "\tPUSHS GF@-tempLeft\n"
          "\n\tMOVE GF@-tempRight int@0\n"
@@ -184,6 +228,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS GF@-tempLeft\n"
          "\n\tLT GF@-temp GF@-tempLeft GF@-tempRight\n"
          "\tJUMPIFEQ -error GF@-temp bool@true\n"
+
          "\tMOVE GF@-tempLeft LF@start$0\n"
          "\tPUSHS GF@-tempLeft\n"
          "\n\tMOVE GF@-tempRight LF@end$0\n"
@@ -192,6 +237,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS GF@-tempLeft\n"
          "\n\tGT GF@-temp GF@-tempLeft GF@-tempRight\n"
          "\tJUMPIFEQ -error GF@-temp bool@true\n"
+
          "\tMOVE GF@-tempLeft LF@start$0\n"
          "\tPUSHS GF@-tempLeft\n"
          "\n\tMOVE GF@-tempRight LF@len$1\n"
@@ -204,6 +250,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS GF@-tempLeft\n"
          "\tOR GF@-temp GF@-temp GF@-tempLeft\n"
          "\tJUMPIFEQ -error GF@-temp bool@true\n"
+
          "\tMOVE GF@-tempLeft LF@end$0\n"
          "\tPUSHS GF@-tempLeft\n"
          "\n\tMOVE GF@-tempRight LF@len$1\n"
@@ -212,10 +259,13 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS GF@-tempLeft\n"
          "\n\tGT GF@-temp GF@-tempLeft GF@-tempRight\n"
          "\tJUMPIFEQ -error GF@-temp bool@true\n"
+
          "\n\tMOVE LF@res$1 string@\n"
          "\tMOVE LF@i$1 LF@start$0\n"
          "\n\t# Definition of loop variables\n"
          "\tDEFVAR LF@c$2\n"
+
+         // Procházení řetězce.
          "\nLABEL -subStrWhileStart\n"
          "\tMOVE GF@-tempLeft LF@i$1\n"
          "\tPUSHS GF@-tempLeft\n"
@@ -225,7 +275,10 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS GF@-tempLeft\n"
          "\n\tLT GF@-temp GF@-tempLeft GF@-tempRight\n"
          "\tJUMPIFNEQ -subStrWhileEnd GF@-temp bool@true\n"
+
          "\nLABEL -subStrWhileBody\n"
+
+         // Vytváření podřetězce
          "\tGETCHAR LF@c$2 LF@value$0 LF@i$1\n"
          "\tCONCAT LF@res$1 LF@res$1 LF@c$2\n"
          "\tMOVE GF@-tempLeft LF@i$1\n"
@@ -237,16 +290,22 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\n\tADD GF@-temp GF@-tempLeft GF@-tempRight\n"
          "\tMOVE LF@i$1 GF@-temp\n"
          "\tJUMP -subStrWhileStart\n"
+
          "\nLABEL -subStrWhileEnd\n"
+
+         // Vrácení z funkce.
          "\tPUSHS LF@res$1\n"
          "\tRETURN\n\n");
 
+  // Funkce ord.
   printf("LABEL ord\n"
          "\tDEFVAR LF@index\n"
          "\tPOPS LF@index\n"
          "\tDEFVAR LF@value\n"
          "\tPOPS LF@value\n"
          "\tDEFVAR LF@len\n"
+
+         // Podmínky funkce.
          "\n\tJUMPIFEQ -ordErr LF@value string@\n"
          "\n\tCREATEFRAME\n"
          "\tPUSHS LF@value\n"
@@ -256,32 +315,44 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPOPS LF@len\n"
          "\tLT GF@-temp LF@index LF@len\n"
          "\tJUMPIFEQ -ordErr GF@-temp bool@false\n"
+
          "\tLT GF@-temp LF@index int@0\n"
          "\tJUMPIFEQ -ordErr GF@-temp bool@true\n"
+
+         // Počítání hodnoty znaku.
          "\n\tSTRI2INT GF@-temp LF@value LF@index\n"
          "\tPUSHS GF@-temp\n"
          "\tJUMP -ordSkip\n"
+
+         // Chybový stav funnkce.
          "\nLABEL -ordErr\n"
          "\tPUSHS int@-1\n"
+
+         // Vrácení z funkce.
          "\nLABEL -ordSkip\n"
          "\tRETURN\n\n");
 
+  // Funkce chr.
   printf("LABEL chr\n"
          "\tPOPS GF@-temp\n"
          "\tINT2CHAR GF@-temp GF@-temp\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Funkce readBoolean
   printf("LABEL readBoolean\n"
          "\tREAD GF@-temp bool\n"
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
+  // Pomocná funkce -floorHelp
   printf("LABEL -floorHelp\n"
          "\tDEFVAR LF@number\n"
          "\tPOPS LF@number\n"
          "\tLT GF@-temp LF@number int@0\n"
          "\tJUMPIFEQ -floorHelpSkip GF@-temp bool@false\n"
+
+         // Pokud to je potřeba, správně zaokrouhlí záporná čísla.
          "\tSUB LF@number LF@number int@1\n"
          "\nLABEL -floorHelpSkip\n"
          "\tPUSHS LF@number\n"
@@ -291,17 +362,28 @@ static IFJ_ERR start_code(ast_node_t *root) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Formátuje řetězec podle specifikace jazyka IFJcode26.
+ *
+ * @param value Ukazatel na Řetězec, který se má formátovat.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR format_str(char **value) {
   CHECK_ARG_NULL_RET(value);
 
+  // Podmínka přetečení.
   size_t len = strlen(*value);
-  if (len > (SIZE_MAX - 1) / 4)
+  if (len > (SIZE_MAX - 1) / 4) {
+    LOG_ERR(IFJ_EINTERNAL, "String is too long");
     return IFJ_EINTERNAL;
+  }
+
   size_t cap = len * 4 + 1;
 
   char *s = malloc(cap);
   CHECK_MEM_ERR(s);
 
+  // Formátování znak po znaku.
   size_t o = 0;
   for (size_t i = 0; i < len; i++) {
     unsigned char c = (unsigned char)(*value)[i];
@@ -321,20 +403,33 @@ static IFJ_ERR format_str(char **value) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Formátuje hodnotu podle specifikace jazyka IFJcode26.
+ *
+ * @param snippet Ukazatel na hodnotu, která se má formátovat. O jeho uvolnění
+ * se stará tato funkce.
+ * @param type Datový typ hodnoty.
+ * @return IFJ_SUCCESS při úspěchu, jinak IFJ_EINTERNAL.
+ */
 static IFJ_ERR format(char **snippet, data_type_t type) {
+  CHECK_ARG_NULL_RET(snippet);
   IFJ_ERR err;
   int n;
   char *s;
+
   if (type == TYPE_STRING) {
     err = format_str(snippet);
     CHECK_ERR_GOTO(err, cleanup);
 
+    // Změří, kolik znaků je potřeba alokovat.
     n = snprintf(NULL, 0, "string@%s", *snippet);
     if (n < 0)
       goto cleanup;
 
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR_GOTO(s, cleanup);
+
+    // Uložení formátované hodnoty.
     n = snprintf(s, (size_t)n + 1, "string@%s", *snippet);
 
     if (n < 0)
@@ -344,12 +439,15 @@ static IFJ_ERR format(char **snippet, data_type_t type) {
     *snippet = s;
 
   } else if (type == TYPE_INT) {
+    // Změří, kolik znaků je potřeba alokovat.
     n = snprintf(NULL, 0, "int@%s", *snippet);
     if (n < 0)
       goto cleanup;
 
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR_GOTO(s, cleanup);
+
+    // Uložení formátované hodnoty.
     n = snprintf(s, (size_t)n + 1, "int@%s", *snippet);
 
     if (n < 0)
@@ -359,12 +457,15 @@ static IFJ_ERR format(char **snippet, data_type_t type) {
     *snippet = s;
 
   } else if (type == TYPE_DOUBLE) {
+    // Změří, kolik znaků je potřeba alokovat.
     n = snprintf(NULL, 0, "float@%s", *snippet);
     if (n < 0)
       goto cleanup;
 
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR_GOTO(s, cleanup);
+
+    // Uložení formátované hodnoty.
     n = snprintf(s, (size_t)n + 1, "float@%s", *snippet);
 
     if (n < 0)
@@ -374,12 +475,15 @@ static IFJ_ERR format(char **snippet, data_type_t type) {
     *snippet = s;
 
   } else if (type == TYPE_BOOL) {
+    // Změří, kolik znaků je potřeba alokovat.
     n = snprintf(NULL, 0, "bool@%s", *snippet);
     if (n < 0)
       goto cleanup;
 
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR_GOTO(s, cleanup);
+
+    // Uložení formátované hodnoty.
     n = snprintf(s, (size_t)n + 1, "bool@%s", *snippet);
 
     if (n < 0)
@@ -393,10 +497,20 @@ static IFJ_ERR format(char **snippet, data_type_t type) {
 
 cleanup:
   free(*snippet);
+  LOG_ERR(IFJ_EINTERNAL, "Couldn't format literal");
   return IFJ_EINTERNAL;
 }
 
+/**
+ * @brief Vygeneruje operaci.
+ *
+ * @param expr Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param snippet Ukazatel, do kterého se vloží vybraná operace.
+ * @return IFJ_SUCCESS při úspěchu, jinak IFJ_EINTERNAL.
+ */
 static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
+  CHECK_ARGS_NULL_RET(expr, snippet);
+
   token_type_t type = expr->as.expr.operator_type;
   ast_node_t *left = expr->as.expr.binary.lhs;
   ast_node_t *right = expr->as.expr.binary.rhs;
@@ -405,6 +519,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
   switch (type) {
   case TOK_EQ:
     if (left->inferred_type.type != right->inferred_type.type) {
+      // Podmínka operace.
       if (left->inferred_type.type + right->inferred_type.type > 1) {
         err = IFJ_EINTERNAL;
         break;
@@ -422,6 +537,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_NEQ:
     if (left->inferred_type.type != right->inferred_type.type) {
+      // Podmínka operace.
       if (left->inferred_type.type + right->inferred_type.type > 1) {
         err = IFJ_EINTERNAL;
         break;
@@ -440,6 +556,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_LT:
     if (left->inferred_type.type != right->inferred_type.type) {
+      // Podmínka operace.
       if (left->inferred_type.type + right->inferred_type.type > 1) {
         err = IFJ_EINTERNAL;
         break;
@@ -452,9 +569,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       }
     }
 
-    if (left->inferred_type.type ==
-        TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
-                            // operace EQ
+    // Datový typ nil se může porovnávat pouze pomocí operace EQ.
+    if (left->inferred_type.type == TYPE_UNIT) {
       err = IFJ_EINTERNAL;
     }
 
@@ -463,6 +579,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_GT:
     if (left->inferred_type.type != right->inferred_type.type) {
+      // Podmínka operace.
       if (left->inferred_type.type + right->inferred_type.type > 1) {
         err = IFJ_EINTERNAL;
         break;
@@ -475,9 +592,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
       }
     }
 
-    if (left->inferred_type.type ==
-        TYPE_UNIT) { // datový typ nil se může porovnávat pouze pomocí
-                            // operace EQ
+    // Datový typ nil se může porovnávat pouze pomocí operace EQ.
+    if (left->inferred_type.type == TYPE_UNIT) {
       err = IFJ_EINTERNAL;
     }
 
@@ -486,6 +602,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_LEQ:
     if (left->inferred_type.type != right->inferred_type.type) {
+      // Podmínka operace.
       if (left->inferred_type.type + right->inferred_type.type > 1) {
         err = IFJ_EINTERNAL;
         break;
@@ -506,10 +623,11 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_GEQ:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (!(left->inferred_type.type == TYPE_INT &&
-            right->inferred_type.type == TYPE_DOUBLE ||
-            left->inferred_type.type == TYPE_DOUBLE &&
-            right->inferred_type.type == TYPE_INT)) {
+      // Podmínka operace.
+      if (!((left->inferred_type.type == TYPE_INT &&
+             right->inferred_type.type == TYPE_DOUBLE) ||
+            (left->inferred_type.type == TYPE_DOUBLE &&
+             right->inferred_type.type == TYPE_INT))) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -529,8 +647,9 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_ADD:
     if (left->inferred_type.type != right->inferred_type.type) {
+      // Podmínka operace.
       if ((left->inferred_type.type >= TYPE_STRING) !=
-          (right->inferred_type.type >= TYPE_STRING)) { // logický XOR
+          (right->inferred_type.type >= TYPE_STRING)) { // Logický XOR.
         err = IFJ_EINTERNAL;
         break;
       }
@@ -541,6 +660,8 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
     }
+
+    // Operace na základě datového typu operandů.
     switch (left->inferred_type.type) {
     case TYPE_INT:
       *snippet = "\tADD GF@-temp GF@-tempLeft GF@-tempRight\n";
@@ -563,10 +684,11 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_SUB:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (!(left->inferred_type.type == TYPE_INT &&
-            right->inferred_type.type == TYPE_DOUBLE ||
-            left->inferred_type.type == TYPE_DOUBLE &&
-            right->inferred_type.type == TYPE_INT)) {
+      // Podmínka operace.
+      if (!((left->inferred_type.type == TYPE_INT &&
+             right->inferred_type.type == TYPE_DOUBLE) ||
+            (left->inferred_type.type == TYPE_DOUBLE &&
+             right->inferred_type.type == TYPE_INT))) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -577,7 +699,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
     } else if ((left->inferred_type.type != TYPE_INT) &&
-               (left->inferred_type.type != TYPE_DOUBLE)) {
+               (left->inferred_type.type != TYPE_DOUBLE)) { // Podmínka operace.
       err = IFJ_EINTERNAL;
     }
 
@@ -586,10 +708,11 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_MUL:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (!(left->inferred_type.type == TYPE_INT &&
-            right->inferred_type.type == TYPE_DOUBLE ||
-            left->inferred_type.type == TYPE_DOUBLE &&
-            right->inferred_type.type == TYPE_INT)) {
+      // Podmínka ooperace.
+      if (!((left->inferred_type.type == TYPE_INT &&
+             right->inferred_type.type == TYPE_DOUBLE) ||
+            (left->inferred_type.type == TYPE_DOUBLE &&
+             right->inferred_type.type == TYPE_INT))) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -600,7 +723,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
     } else if ((left->inferred_type.type != TYPE_INT) &&
-               (left->inferred_type.type != TYPE_DOUBLE)) {
+               (left->inferred_type.type != TYPE_DOUBLE)) { // Podmínka operace.
       err = IFJ_EINTERNAL;
     }
 
@@ -609,10 +732,11 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 
   case TOK_DIV:
     if (left->inferred_type.type != right->inferred_type.type) {
-      if (!(left->inferred_type.type == TYPE_INT &&
-            right->inferred_type.type == TYPE_DOUBLE ||
-            left->inferred_type.type == TYPE_DOUBLE &&
-            right->inferred_type.type == TYPE_INT)) {
+      // Podmínka ooperace.
+      if (!((left->inferred_type.type == TYPE_INT &&
+             right->inferred_type.type == TYPE_DOUBLE) ||
+            (left->inferred_type.type == TYPE_DOUBLE &&
+             right->inferred_type.type == TYPE_INT))) {
         err = IFJ_EINTERNAL;
         break;
       }
@@ -623,11 +747,11 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
         printf("\tINT2FLOAT GF@-tempRight GF@-tempRight\n");
       }
     } else if ((left->inferred_type.type != TYPE_INT) &&
-               (left->inferred_type.type != TYPE_DOUBLE)) {
+               (left->inferred_type.type != TYPE_DOUBLE)) { // Podmínka operace.
       err = IFJ_EINTERNAL;
     }
 
-    // Oba operandy jsou stejného typu a to buď TYPE_DOUBLE nebo TYPE_INT
+    // Operace na základě datového typu operandů.
     if (left->inferred_type.type == TYPE_DOUBLE) {
       *snippet = "\tDIV GF@-temp GF@-tempLeft GF@-tempRight\n";
     } else {
@@ -637,6 +761,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     break;
 
   case TOK_AND:
+    // Podmínka operace.
     if (left->inferred_type.type != right->inferred_type.type ||
         left->inferred_type.type != TYPE_BOOL) {
       err = IFJ_EINTERNAL;
@@ -646,6 +771,7 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
     break;
 
   case TOK_OR:
+    // Podmínka operace.
     if (left->inferred_type.type != right->inferred_type.type ||
         left->inferred_type.type != TYPE_BOOL) {
       err = IFJ_EINTERNAL;
@@ -664,39 +790,54 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR valmem_chain(ast_node_t *expr) {
+/**
+ * @brief Generuje rozšíření VALMEM.
+ *
+ * Po zavolání se výsledek nachází v GF@-temp.
+ *
+ * @param expr Ukazatel na uzel abstraktního syntaktcikého stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR valmem(ast_node_t *expr) {
+  CHECK_ARG_NULL_RET(expr);
   IFJ_ERR err;
   char *snippet;
 
+  // Podmínka ukončující rekurzi.
   if (expr->as.expr.binary.lhs->type != AST_EXPR) {
-    err = get_snippet(expr->as.expr.unary.operand, &snippet);
+    err = get_snippet(expr->as.expr.binary.lhs, &snippet);
     CHECK_ERR_RET(err);
 
     if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
-      printf("\tCREATEFRAME\n"
+      printf("\n\t# VALMEM\n"
+             "\tCREATEFRAME\n"
              "\tPUSHS %s\n"
              "\tPUSHFRAME\n"
              "\tCALL toStr\n"
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
+      free(snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
-      printf("\tCREATEFRAME\n"
+      printf("\n\t# VALMEM\n"
+             "\tCREATEFRAME\n"
              "\tPUSHS %s\n"
              "\tPUSHFRAME\n"
              "\tCALL toInt\n"
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
+      free(snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
-      printf("\tCREATEFRAME\n"
+      printf("\n\t# VALMEM\n"
+             "\tCREATEFRAME\n"
              "\tPUSHS %s\n"
              "\tPUSHFRAME\n"
              "\tCALL strLength\n"
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
-
+      free(snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
       printf("\tCREATEFRAME\n"
              "\tPUSHS %s\n"
@@ -710,12 +851,13 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
              "\tPOPS GF@-temp\n"
              "\tINT2FLOAT GF@-temp GF@-temp\n",
              snippet);
+      free(snippet);
     }
-    free(snippet);
 
     return IFJ_SUCCESS;
   } else {
-    err = valmem_chain(expr->as.expr.binary.lhs);
+    // Zřetězení VALMEM.
+    err = valmem(expr->as.expr.binary.lhs);
     CHECK_ERR_RET(err);
 
     printf("\tCREATEFRAME\n");
@@ -744,6 +886,14 @@ static IFJ_ERR valmem_chain(ast_node_t *expr) {
   }
 }
 
+/**
+ * @brief Generuje výpočet výrazu.
+ *
+ * Po zavolání se výsledek nachází v GF@-temp.
+ *
+ * @param expr Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR calc_expression(ast_node_t *expr) {
   CHECK_ARG_NULL_RET(expr);
   char *snippet;
@@ -752,7 +902,8 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
   if (expr->as.expr.is_unary) {
     if (expr->as.expr.operator_type != TOK_NOT &&
         expr->as.expr.operator_type != TOK_SUB) {
-      LOG_ERR(IFJ_EINTERNAL, "Unknown unary operator: %d", expr->as.expr.operator_type);
+      LOG_ERR(IFJ_EINTERNAL, "Unknown unary operator: %d",
+              expr->as.expr.operator_type);
       return IFJ_EINTERNAL;
     }
 
@@ -784,68 +935,19 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
     }
 
   } else {
-    if (expr->as.expr.operator_type == TOK_NOT) { // jediný nebinární operand
+    // Jediný nebinární operand.
+    if (expr->as.expr.operator_type == TOK_NOT) {
+      LOG_ERR(IFJ_EINTERNAL, "NOT is non-binary operator type");
       return IFJ_EINTERNAL;
     }
 
+    // Získání levé strany.
     if (expr->as.expr.operator_type == TOK_DOT) {
-      if (expr->as.expr.binary.lhs->type != AST_EXPR) {
-        err = get_snippet(expr->as.expr.binary.lhs, &snippet);
-        CHECK_ERR_RET(err);
-
-        if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
-          printf("\n\t# VALMEM\n"
-                 "\tCREATEFRAME\n"
-                 "\tPUSHS %s\n"
-                 "\tPUSHFRAME\n"
-                 "\tCALL toStr\n"
-                 "\tPOPFRAME\n"
-                 "\tPOPS GF@-temp\n",
-                 snippet);
-          free(snippet);
-        } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
-          printf("\n\t# VALMEM\n"
-                 "\tCREATEFRAME\n"
-                 "\tPUSHS %s\n"
-                 "\tPUSHFRAME\n"
-                 "\tCALL toInt\n"
-                 "\tPOPFRAME\n"
-                 "\tPOPS GF@-temp\n",
-                 snippet);
-          free(snippet);
-        } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
-          printf("\n\t# VALMEM\n"
-                 "\tCREATEFRAME\n"
-                 "\tPUSHS %s\n"
-                 "\tPUSHFRAME\n"
-                 "\tCALL strLength\n"
-                 "\tPOPFRAME\n"
-                 "\tPOPS GF@-temp\n",
-                 snippet);
-          free(snippet);
-        } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
-          printf("\tCREATEFRAME\n"
-                 "\tPUSHS %s\n"
-                 "\tPUSHFRAME\n"
-                 "\tCALL toInt\n"
-                 "\tPOPFRAME\n"
-                 "\tCREATEFRAME\n"
-                 "\tPUSHFRAME\n"
-                 "\tCALL -floorHelp\n"
-                 "\tPOPFRAME\n"
-                 "\tPOPS GF@-temp\n"
-                 "\tINT2FLOAT GF@-temp GF@-temp\n",
-                 snippet);
-          free(snippet);
-        }
-      } else {
-        err = valmem_chain(expr);
-        CHECK_ERR_RET(err);
-      }
+      err = valmem(expr);
+      CHECK_ERR_RET(err);
 
       return IFJ_SUCCESS;
-    } else if (expr->as.expr.binary.lhs->type ==
-               AST_EXPR) { // získání levé strany
+    } else if (expr->as.expr.binary.lhs->type == AST_EXPR) {
       err = calc_expression(expr->as.expr.binary.lhs);
       CHECK_ERR_RET(err);
 
@@ -866,7 +968,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
 
     printf("\tPUSHS GF@-tempLeft\n\n");
 
-    // získání pravé strany
+    // Získání pravé strany.
     if (expr->as.expr.binary.rhs->type == AST_EXPR) {
       err = calc_expression(expr->as.expr.binary.rhs);
       CHECK_ERR_RET(err);
@@ -890,6 +992,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
 
     printf("\tPOPS GF@-tempLeft\n\n");
 
+    // Spočítání výrazu.
     err = get_op(expr, (const char **)&snippet);
     CHECK_ERR_RET(err);
 
@@ -899,11 +1002,16 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR call_func(ast_node_t *func_call) {
+/**
+ * @brief Uložení parametrů funkce na datový zísobník.
+ *
+ * @param func_call Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR push_params(ast_node_t *func_call) {
   CHECK_ARG_NULL_RET(func_call);
-
-  char *snippet;
   IFJ_ERR err;
+  char *snippet;
 
   for (size_t i = 0; i < func_call->as.func_call.param_lists_cnt; i++) {
     ast_node_t *param_list = func_call->as.func_call.param_lists[i];
@@ -925,7 +1033,6 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
         printf("\tPUSHS GF@-temp\n");
       } else if (param->type == AST_FUNC_CALL) {
         err = call_func(param);
-        // printf("\tCREATEFRAME\n");
         CHECK_ERR_RET(err);
       } else {
         LOG_ERR(IFJ_EINTERNAL, "Unknown parameter type");
@@ -933,6 +1040,23 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
       }
     }
   }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Generuje volání funkce.
+ *
+ * @param func_call Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR call_func(ast_node_t *func_call) {
+  CHECK_ARG_NULL_RET(func_call);
+  IFJ_ERR err;
+
+  err = push_params(func_call);
+  CHECK_ERR_RET(err);
+
   printf("\tCREATEFRAME\n");
   printf("\tPUSHFRAME\n");
   printf("\tCALL %s\n", func_call->as.func_call.id);
@@ -940,6 +1064,12 @@ static IFJ_ERR call_func(ast_node_t *func_call) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Generuje přiřazení hodnoty.
+ *
+ * @param assign Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR assign(ast_node_t *assign) {
   CHECK_ARG_NULL_RET(assign);
   IFJ_ERR err;
@@ -989,6 +1119,13 @@ static IFJ_ERR assign(ast_node_t *assign) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Generuje else if skoky podmínky.
+ *
+ * @param elif Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param id Identifikátor větve podmínky.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
   CHECK_ARG_NULL_RET(elif);
   IFJ_ERR err;
@@ -1035,7 +1172,10 @@ static IFJ_ERR else_condition_expr(ast_node_t *elif, int id) {
 }
 
 /**
- * @param id Slouží k vytváření návěští.
+ * @brief Generuje podmínky.
+ *
+ * @param if_st Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
  */
 static IFJ_ERR condition(ast_node_t *if_st) {
   CHECK_ARG_NULL_RET(if_st);
@@ -1044,8 +1184,9 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   static int last_id = 0;
   int id = ++last_id;
 
-  printf("LABEL -start%d\n", id); // redundant?
+  printf("# Condition %d\n", id);
 
+  // Vytvoření podmínkového skoku.
   switch (if_st->as.if_st.expr->type) {
   case AST_VAR:
     err = get_snippet(if_st->as.if_st.expr, &snippet);
@@ -1085,29 +1226,27 @@ static IFJ_ERR condition(ast_node_t *if_st) {
 
   int elif_ids[if_st->as.if_st.else_if_cnt];
 
-  // vytvoření else if skoků
+  // Generování else if skoků.
   for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
     elif_ids[i] = ++last_id;
-    err = else_condition_expr(if_st->as.if_st.else_if[i],
-                              elif_ids[i]); // jelikoz to je jiny AST_TYPE
+    err = else_condition_expr(if_st->as.if_st.else_if[i], elif_ids[i]);
     CHECK_ERR_RET(err);
   }
 
   printf("\tJUMP -%s%d\n", if_st->as.if_st.else_st == NULL ? "end" : "else",
          id);
 
-  // vytvoř else if bloků
+  // Generování else if těl.
   for (size_t i = 0; i < if_st->as.if_st.else_if_cnt; i++) {
     printf("LABEL -then%d\n", elif_ids[i]);
-    err =
-        generate_body(if_st->as.if_st.else_if[i]
-                          ->as.else_if_st.body); // jelikoz to je jiny AST_TYPE
+    err = generate_body(if_st->as.if_st.else_if[i]->as.else_if_st.body);
     CHECK_ERR_RET(err);
 
     printf("\tJUMP -end%d\n", id);
   }
 
-  if (if_st->as.if_st.else_st) { // else větev nemusí existovat
+  // Pokud exituje else větev, generuje její tělo.
+  if (if_st->as.if_st.else_st) {
     printf("LABEL -else%d\n", id);
     err = generate_body(if_st->as.if_st.else_st);
     CHECK_ERR_RET(err);
@@ -1115,6 +1254,7 @@ static IFJ_ERR condition(ast_node_t *if_st) {
     printf("\tJUMP -end%d\n", id);
   }
 
+  // Generování podmínkového těla.
   printf("\nLABEL -then%d\n", id);
   err = generate_body(if_st->as.if_st.body);
   CHECK_ERR_RET(err);
@@ -1124,11 +1264,21 @@ static IFJ_ERR condition(ast_node_t *if_st) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Generuje definici proměnné.
+ *
+ * Proměnné se definují na začátku funkce.
+ * Přiřazení hodnoty probíhá až v průběhu funkce.
+ *
+ * @param def Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR define_var(ast_node_t *def) {
   CHECK_ARG_NULL_RET(def);
   char *snippet;
   IFJ_ERR err;
 
+  // Pokud už je proměnná definovaná, přiřadí jí hodnotu.
   for (size_t i = 1; i < local_ids.size; i++) {
     if (strcmp(def->as.def.id, local_ids.data[i]) == 0) {
 
@@ -1163,6 +1313,7 @@ static IFJ_ERR define_var(ast_node_t *def) {
     }
   }
 
+  // Pokud proměnná není definovaná, definuje jí.
   printf("\tDEFVAR LF@%s\n", def->as.def.id);
 
   char **p = realloc(local_ids.data, (local_ids.size + 1) * sizeof *p);
@@ -1175,6 +1326,12 @@ static IFJ_ERR define_var(ast_node_t *def) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Definuje všechny lokální proměnné.
+ *
+ * @param body Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR define_local_vars(ast_node_t *body) {
   CHECK_ARG_NULL_RET(body);
   IFJ_ERR err;
@@ -1193,6 +1350,12 @@ static IFJ_ERR define_local_vars(ast_node_t *body) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Generuje cylkus while.
+ *
+ * @param while_st Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR while_loop(ast_node_t *while_st) {
   CHECK_ARG_NULL_RET(while_st);
   IFJ_ERR err;
@@ -1201,13 +1364,14 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
   int id = ++last_id;
   ast_node_t *body = while_st->as.while_st.body;
 
-  // definování vnořených proměnných cyklů
+  // Definice vnořených proměnných cyklu.
   printf("\n\t# Definition of loop variables\n");
   err = define_local_vars(body);
   CHECK_ERR_RET(err);
 
   printf("\nLABEL -whileStart%d\n", id);
 
+  // Podmínky cyklu.
   switch (while_st->as.while_st.expr->type) {
   case AST_VAR:
     err = get_snippet(while_st->as.while_st.expr, &snippet);
@@ -1247,7 +1411,7 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
 
   printf("\nLABEL -whileBody%d\n", id);
 
-  // generuje každou instrukci
+  // Generuje tělo cyklu.
   for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
     ast_node_t *instruction = body->as.block.commands[i];
 
@@ -1255,6 +1419,7 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
     CHECK_ERR_RET(err);
   }
 
+  // Cyklení.
   printf("\tJUMP -whileStart%d\n", id);
 
   printf("\nLABEL -whileEnd%d\n", id);
@@ -1262,11 +1427,18 @@ static IFJ_ERR while_loop(ast_node_t *while_st) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Definuje řídící proměnnou for cyklu.
+ *
+ * @param gen Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR define_loop_var(ast_node_t *gen) {
   CHECK_ARG_NULL_RET(gen);
   IFJ_ERR err;
   char *snippet;
 
+  // Pokud proměnná je již definovaná, přiřadí jí startovní hodnotu.
   for (size_t i = 1; i < local_ids.size; i++) {
     if (strcmp(gen->as.for_gen.id, local_ids.data[i]) == 0) {
       if (gen->as.for_gen.range != NULL) {
@@ -1296,16 +1468,16 @@ static IFJ_ERR define_loop_var(ast_node_t *gen) {
           CHECK_ERR_RET(err);
           printf("\tPOPS LF@%s\n", gen->as.for_gen.id);
         }
-      } else {
-        // lists - TODO
       }
 
       return IFJ_SUCCESS;
     }
   }
 
+  // Pokud proměnná není definovaná, definuje jí.
   printf("\tDEFVAR LF@%s\n", gen->as.for_gen.id);
 
+  // Přiřazení startovní hodnoty.
   switch (gen->as.for_gen.expr->type) {
   case AST_EXPR:
     err = calc_expression(gen->as.for_gen.expr);
@@ -1358,156 +1530,126 @@ static IFJ_ERR define_loop_var(ast_node_t *gen) {
   return IFJ_SUCCESS;
 }
 
-static IFJ_ERR for_loop(ast_node_t *for_loop) {
-  CHECK_ARG_NULL_RET(for_loop);
+/**
+ * @brief Generuje rozsah řídící proměnné for cyklu.
+ *
+ * @param range Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param loop_var Název řídící proměnné.
+ * @param id Identifikátor for cyklu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR for_loop_range(ast_node_t *range, char *loop_var, int id) {
+  CHECK_ARG_NULL_RET(range);
   IFJ_ERR err;
   char *snippet;
-  static int last_id = 0;
-  int id = ++last_id;
-  ast_node_t *body = for_loop->as.for_st.body;
-  ast_node_t *gen = for_loop->as.for_st.gen;
-  ast_node_t *range = gen->as.for_gen.range;
 
-  // definování vnořených proměnných cyklů
-  printf("\n\t# Definition of loop variables\n");
-  err = define_loop_var(gen);
-  CHECK_ERR_RET(err);
-  err = define_local_vars(body);
-  CHECK_ERR_RET(err);
-
-  printf("\tDEFVAR LF@-forHelp2-%d\n", id);
-
-  char *loop_var = gen->as.for_gen.id;
-
-  if (range != NULL) {
-    printf("\t# Condition\n");
-    switch (range->as.for_range.expr->type) {
-    case AST_LITERAL:
-      err = get_snippet(range->as.for_range.expr, &snippet);
-      CHECK_ERR_RET(err);
-
-      printf("\tDEFVAR LF@-forHelp%d\n", id);
-      if (!range->as.for_range.until) {
-        printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
-        printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-        printf("\tJUMPIFEQ -forDescendingBefore%d GF@-temp bool@true\n", id);
-
-      } else {
-        printf("\tMOVE LF@-forHelp%d %s\n", id, snippet);
-      }
-
-      // podmínky
+  printf("\t# Condition\n");
+  switch (range->as.for_range.expr->type) {
+  case AST_LITERAL:
+    err = get_snippet(range->as.for_range.expr, &snippet);
+    CHECK_ERR_RET(err);
+    // Definice hraniční proměnné.
+    printf("\tDEFVAR LF@-forHelp%d\n", id);
+    if (!range->as.for_range.until) {
+      printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
       printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
-
-      free(snippet);
-
-      printf("\nLABEL -for%d\n", id);
-      printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      break;
-
-    case AST_VAR:
-      err = get_snippet(range->as.for_range.expr, &snippet);
-      CHECK_ERR_RET(err);
-
-      printf("\tDEFVAR LF@-forHelp%d\n", id);
-      if (!range->as.for_range.until) {
-        printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
-      } else {
-        printf("\tMOVE LF@-forHelp%d %s\n", id, snippet);
-      }
-
-      // podmínky
-      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
-
-      free(snippet);
-
-      printf("\nLABEL -for%d\n", id);
-      printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      break;
-
-    case AST_EXPR:
-      err = calc_expression(range->as.for_range.expr);
-      CHECK_ERR_RET(err);
-
-      printf("\tDEFVAR LF@-forHelp%d\n", id);
-      if (!range->as.for_range.until) {
-        printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
-      } else {
-        printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
-      }
-
-      // podmínky
-      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
-
-      printf("\nLABEL -for%d\n", id);
-
-      printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
-      break;
-
-    case AST_FUNC_CALL:
-      err = call_func(range->as.for_range.expr);
-      CHECK_ERR_RET(err);
-
-      printf("\tPOPS GF@-temp\n");
-
-      printf("\tDEFVAR LF@-forHelp%d\n", id);
-      if (!range->as.for_range.until) {
-        printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
-      } else {
-        printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
-      }
-
-      // podmínky
-      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
-
-      printf("\nLABEL -for%d\n", id);
-
-      printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
-      break;
-
-    case AST_IF:
-      err = condition(range->as.for_range.expr);
-      CHECK_ERR_RET(err);
-
-      printf("\tPOPS GF@-temp\n");
-
-      printf("\tDEFVAR LF@-forHelp%d\n", id);
-      if (!range->as.for_range.until) {
-        printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
-      } else {
-        printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
-      }
-
-      // podmínky
-      printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-      printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
-
-      printf("\nLABEL -for%d\n", id);
-
-      printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
-      break;
-
-    default:
-      LOG_ERR(IFJ_EINTERNAL, "Unknown expression in for loop");
-      return IFJ_EINTERNAL;
+      printf("\tJUMPIFEQ -forDescendingBefore%d GF@-temp bool@true\n", id);
+    } else {
+      printf("\tMOVE LF@-forHelp%d %s\n", id, snippet);
     }
-
-  } else {
-    // LISTS - TODO
+    // Podmínky cyklu.
+    printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
+    free(snippet);
+    printf("\nLABEL -for%d\n", id);
+    printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    break;
+  case AST_VAR:
+    err = get_snippet(range->as.for_range.expr, &snippet);
+    CHECK_ERR_RET(err);
+    // Definice hraniční proměnné.
+    printf("\tDEFVAR LF@-forHelp%d\n", id);
+    if (!range->as.for_range.until) {
+      printf("\tADD LF@-forHelp%d %s int@1\n", id, snippet);
+    } else {
+      printf("\tMOVE LF@-forHelp%d %s\n", id, snippet);
+    }
+    // Podmínky cyklu.
+    printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
+    free(snippet);
+    printf("\nLABEL -for%d\n", id);
+    printf("\tLT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    break;
+  case AST_EXPR:
+    err = calc_expression(range->as.for_range.expr);
+    CHECK_ERR_RET(err);
+    // Definice hraniční proměnné.
+    printf("\tDEFVAR LF@-forHelp%d\n", id);
+    if (!range->as.for_range.until) {
+      printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
+    } else {
+      printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
+    }
+    // Podmínky cyklu.
+    printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
+    printf("\nLABEL -for%d\n", id);
+    printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
+    break;
+  case AST_FUNC_CALL:
+    err = call_func(range->as.for_range.expr);
+    CHECK_ERR_RET(err);
+    printf("\tPOPS GF@-temp\n");
+    // Definice hraniční proměnné.
+    printf("\tDEFVAR LF@-forHelp%d\n", id);
+    if (!range->as.for_range.until) {
+      printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
+    } else {
+      printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
+    }
+    // Podmínky cyklu.
+    printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
+    printf("\nLABEL -for%d\n", id);
+    printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
+    break;
+  case AST_IF:
+    err = condition(range->as.for_range.expr);
+    CHECK_ERR_RET(err);
+    printf("\tPOPS GF@-temp\n");
+    // Definice hraniční proměnné.
+    printf("\tDEFVAR LF@-forHelp%d\n", id);
+    if (!range->as.for_range.until) {
+      printf("\tADD LF@-forHelp%d GF@-temp int@1\n", id);
+    } else {
+      printf("\tMOVE LF@-forHelp%d GF@-temp\n", id);
+    }
+    // Podmínky cyklu.
+    printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+    printf("\tJUMPIFEQ -forDescending%d GF@-temp bool@true\n", id);
+    printf("\nLABEL -for%d\n", id);
+    printf("\tLT GF@-temp LF@%s GF@-temp\n", loop_var);
+    break;
+  default:
+    LOG_ERR(IFJ_EINTERNAL, "Unknown expression in for loop");
+    return IFJ_EINTERNAL;
   }
 
-  printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
-  printf("\tJUMP -forGuards%d\n", id);
+  return IFJ_SUCCESS;
+}
 
-  printf("\nLABEL -forDescendingBefore%d\n", id);
-  printf("\tSUB LF@-forHelp%d LF@-forHelp%d int@2\n", id, id);
-  printf("\nLABEL -forDescending%d\n", id);
-  printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
-  printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
+/**
+ * @brief Generuje stráž for cyklu.
+ *
+ * @param for_loop Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param id Identifikátor for cyklu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR for_loop_guards(ast_node_t *for_loop, int id) {
+  CHECK_ARG_NULL_RET(for_loop);
+  char *snippet;
+  IFJ_ERR err;
 
   printf("\t# Guards\n");
   printf("\nLABEL -forGuards%d\n", id);
@@ -1560,13 +1702,21 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
     }
   }
 
-  err = generate_body(body);
-  CHECK_ERR_RET(err);
+  return IFJ_SUCCESS;
+}
 
-  printf("\nLABEL -forSkip%d\n", id);
+/**
+ * @brief Přičte krok ve for cyklu.
+ *
+ * @param range Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param loop_var Jmého řídící proměnné for cyklu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR for_loop_step(ast_node_t *range, char *loop_var) {
+  CHECK_ARG_NULL_RET(range);
+  IFJ_ERR err;
+  char *snippet;
 
-  printf("\tMOVE LF@-forHelp2-%d LF@%s\n", id, loop_var);
-  // Přičítání skoku
   if (range->as.for_range.by_expr) {
     switch (range->as.for_range.by_expr->type) {
     case AST_LITERAL:
@@ -1616,6 +1766,68 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
     printf("\n\tADD LF@%s LF@%s int@1\n", loop_var, loop_var);
   }
 
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Generuje for cyklus.
+ *
+ * @param for_loop Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR for_loop(ast_node_t *for_loop) {
+  CHECK_ARG_NULL_RET(for_loop);
+  IFJ_ERR err;
+  static int last_id = 0;
+  int id = ++last_id;
+  ast_node_t *body = for_loop->as.for_st.body;
+  ast_node_t *gen = for_loop->as.for_st.gen;
+  ast_node_t *range = gen->as.for_gen.range;
+
+  // Definování proměnných cyklu.
+  printf("\n\t# Definition of loop variables\n");
+  err = define_loop_var(gen);
+  CHECK_ERR_RET(err);
+  err = define_local_vars(body);
+  CHECK_ERR_RET(err);
+
+  printf("\tDEFVAR LF@-forHelp2-%d\n", id);
+
+  char *loop_var = gen->as.for_gen.id;
+
+  if (range != NULL) {
+    // Rozsah řídící proměnné.
+    err = for_loop_range(range, loop_var, id);
+    CHECK_ERR_RET(err);
+  }
+
+  printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
+  printf("\tJUMP -forGuards%d\n", id);
+
+  // Podmínky cyklu v sestupném pořadí.
+  printf("\nLABEL -forDescendingBefore%d\n", id);
+  printf("\tSUB LF@-forHelp%d LF@-forHelp%d int@2\n", id, id);
+  printf("\nLABEL -forDescending%d\n", id);
+  printf("\tGT GF@-temp LF@%s LF@-forHelp%d\n", loop_var, id);
+  printf("\tJUMPIFEQ -forEnd%d GF@-temp bool@false\n", id);
+
+  // Stráž cyklu.
+  err = for_loop_guards(for_loop, id);
+  CHECK_ERR_RET(err);
+
+  // Tělo cyklu.
+  err = generate_body(body);
+  CHECK_ERR_RET(err);
+
+  printf("\nLABEL -forSkip%d\n", id);
+
+  printf("\tMOVE LF@-forHelp2-%d LF@%s\n", id, loop_var);
+
+  // Přičítání skoku.
+  err = for_loop_step(range, loop_var);
+  CHECK_ERR_RET(err);
+
+  // Cyklení.
   printf("\tJUMPIFEQ -error LF@%s LF@-forHelp2-%d\n", loop_var, id);
 
   printf("\tGT GF@-temp LF@%s LF@-forHelp2-%d\n", loop_var, id);
@@ -1628,6 +1840,12 @@ static IFJ_ERR for_loop(ast_node_t *for_loop) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Generuje explicitní příkaz return jazyka IFJ26.
+ *
+ * @param func_ret Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR ret_st(ast_node_t *func_ret) {
   CHECK_ARG_NULL_RET(func_ret);
   IFJ_ERR err;
@@ -1655,6 +1873,16 @@ static IFJ_ERR ret_st(ast_node_t *func_ret) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Pomocná funkce pro get_snippet, nahraje hodnotu literálu.
+ *
+ * Při chybě uvolňuje alokovanou paměť.
+ * Při úspěchu paměť uvolňuje volající.
+ *
+ * @param literal Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param snippet Ukazatel, kam se má nahrát hodnota literálu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
   CHECK_ARG_NULL_RET(literal);
 
@@ -1663,22 +1891,34 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
 
   switch (literal->as.literal.type) {
   case TYPE_INT:
+    // Kolik znaků se má alokovat.
     n = snprintf(NULL, 0, "%" PRId64, literal->as.literal.int_value);
-    if (n < 0)
+    if (n < 0) {
+      LOG_ERR(IFJ_EINTERNAL, "Couldn't get literal");
       return IFJ_EINTERNAL;
+    }
+
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR(s);
+
+    // Uložení hodnoty literálu.
     n = snprintf(s, (size_t)n + 1, "%" PRId64, literal->as.literal.int_value);
     if (n < 0)
       goto cleanup;
     break;
 
   case TYPE_DOUBLE:
+    // Kolik znaků se má alokovat.
     n = snprintf(NULL, 0, "%a", literal->as.literal.double_value);
-    if (n < 0)
+    if (n < 0) {
+      LOG_ERR(IFJ_EINTERNAL, "Couldn't get literal");
       return IFJ_EINTERNAL;
+    }
+
     s = malloc((size_t)n + 1);
     CHECK_MEM_ERR(s);
+
+    // Uložení hodnoty literálu.
     n = snprintf(s, (size_t)n + 1, "%a", literal->as.literal.double_value);
     if (n < 0)
       goto cleanup;
@@ -1689,6 +1929,8 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
     size_t len = strlen(val) + 1;
     s = malloc(len);
     CHECK_MEM_ERR(s);
+
+    // Uložení hodnoty literálu.
     memcpy(s, val, len);
     break;
   }
@@ -1696,6 +1938,8 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
     size_t len = strlen(literal->as.literal.str_value) + 1;
     s = malloc(len);
     CHECK_MEM_ERR(s);
+
+    // Uložení hodnoty literálu.
     memcpy(s, literal->as.literal.str_value, len);
     break;
   }
@@ -1706,6 +1950,7 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
     s = malloc(len);
     CHECK_MEM_ERR(s);
 
+    // Uložení hodnoty literálu.
     memcpy(s, text, len);
     break;
 
@@ -1721,51 +1966,63 @@ static IFJ_ERR get_literal(ast_node_t *literal, char **snippet) {
 
 cleanup:
   free(s);
-  return IFJ_EINTERNAL;
-}
-
-static IFJ_ERR get_var(ast_node_t *var, char **snippet) {
-  CHECK_ARG_NULL_RET(var);
-
-  size_t len = strlen(var->as.var.id) + 1;
-  *snippet = malloc(len);
-  CHECK_MEM_ERR(*snippet);
-  memcpy(*snippet, var->as.var.id, len); // tohle bude chtit refaktorizovat
-
-  int n = snprintf(NULL, 0, "LF@%s", *snippet);
-  if (n < 0)
-    goto cleanup;
-
-  char *s = malloc((size_t)n + 1);
-  n = snprintf(s, (size_t)n + 1, "LF@%s", *snippet);
-
-  if (n < 0)
-    goto cleanup_all;
-
-  free(*snippet);
-  *snippet = s;
-
-  return IFJ_SUCCESS;
-
-cleanup_all:
-  free(s);
-
-cleanup:
-  free(*snippet);
+  LOG_ERR(IFJ_EINTERNAL, "Couldn't get literal");
   return IFJ_EINTERNAL;
 }
 
 /**
- * @param snippet K předání textu, volající se stará o uvolnění.
+ * @brief Pomocná funkce pro get_snippet, nahraje lokální proměnnou.
+ *
+ * Při chybě uvolňuje alokovanou paměť.
+ * Při úspěchu paměť uvolňuje volající.
+ *
+ * @param var Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param snippet Ukazatel, kam se má nahrát lokální proměnná.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR get_var(ast_node_t *var, char **snippet) {
+  CHECK_ARG_NULL_RET(var);
+
+  // Kolik znaků se má alokovat.
+  int n = snprintf(NULL, 0, "LF@%s", var->as.var.id);
+  if (n < 0) {
+    LOG_ERR(IFJ_EINTERNAL, "Couldn't get variable");
+    return IFJ_EINTERNAL;
+  }
+
+  char *s = malloc((size_t)n + 1);
+
+  // Uložení lokální proměnné.
+  n = snprintf(s, (size_t)n + 1, "LF@%s", var->as.var.id);
+
+  if (n < 0)
+    goto cleanup;
+
+  *snippet = s;
+
+  return IFJ_SUCCESS;
+
+cleanup:
+  free(s);
+  LOG_ERR(IFJ_EINTERNAL, "Couldn't get variable");
+  return IFJ_EINTERNAL;
+}
+
+/**
+ * @brief Pomocná funkce, která předá lokální proměnnou nebo literál.
+ *
+ * @param instruction Ukazatel na uzel abstraktního syntaktického stromu.
+ * @param snippet Ukazatel k předání textu, volající se stará o uvolnění.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
  */
 static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet) {
   CHECK_ARG_NULL_RET(instruction);
 
   switch (instruction->type) {
-  case AST_VAR: // 6
+  case AST_VAR:
     return get_var(instruction, snippet);
 
-  case AST_LITERAL: // 7
+  case AST_LITERAL:
     return get_literal(instruction, snippet);
 
   default:
@@ -1774,6 +2031,12 @@ static IFJ_ERR get_snippet(ast_node_t *instruction, char **snippet) {
   }
 }
 
+/**
+ * @brief Generuje kód instrukce.
+ *
+ * @param intruction Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   CHECK_ARG_NULL_RET(instruction);
 
@@ -1781,14 +2044,14 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   char *snippet;
 
   switch (instruction->type) {
-  case AST_EXPR: // 5
+  case AST_EXPR:
     err = calc_expression(instruction);
     CHECK_ERR_RET(err);
 
     printf("\tPUSHS GF@-temp\n");
     break;
 
-  case AST_VAR: // 6
+  case AST_VAR:
 
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
@@ -1797,7 +2060,7 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     free(snippet);
     break;
 
-  case AST_LITERAL: // 6
+  case AST_LITERAL:
 
     err = get_snippet(instruction, &snippet);
     CHECK_ERR_RET(err);
@@ -1806,25 +2069,25 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
     free(snippet);
     break;
 
-  case AST_DEF: // 8
+  case AST_DEF:
     return define_var(instruction);
 
-  case AST_ASSIGN: // 9
+  case AST_ASSIGN:
     return assign(instruction);
 
-  case AST_IF: // 10
+  case AST_IF:
     return condition(instruction);
 
-  case AST_FOR: // 12
+  case AST_FOR:
     return for_loop(instruction);
 
-  case AST_WHILE: // 16
+  case AST_WHILE:
     return while_loop(instruction);
 
-  case AST_FUNC_RET: // 17
+  case AST_FUNC_RET:
     return ret_st(instruction);
 
-  case AST_FUNC_CALL: // 18
+  case AST_FUNC_CALL:
     err = call_func(instruction);
     CHECK_ERR_RET(err);
     break;
@@ -1837,6 +2100,12 @@ static IFJ_ERR generate_instruction(ast_node_t *instruction) {
   return IFJ_SUCCESS;
 }
 
+/**
+ * @brief Generuje blok instrukcí.
+ *
+ * @param body Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR generate_body(ast_node_t *body) {
   CHECK_ARG_NULL_RET(body);
   ast_node_t *instruction;
@@ -1847,12 +2116,12 @@ static IFJ_ERR generate_body(ast_node_t *body) {
     return err;
   }
 
-  // definování lokálních proměnných
+  // Definice lokálních proměnných na začátku bloku.
   printf("\t# Definition of local variables\n");
   err = define_local_vars(body);
   CHECK_ERR_RET(err);
 
-  // generuje každou instrukci
+  // Generuje každou instrukci.
   for (size_t i = 0; i < body->as.block.commands_cnt; i++) {
     instruction = body->as.block.commands[i];
     err = generate_instruction(instruction);
@@ -1863,10 +2132,13 @@ static IFJ_ERR generate_body(ast_node_t *body) {
 }
 
 /**
- * parametry jsou na data stack
- * pak jsou ale ihned vytvoreny kopie v local framu
+ * @brief Generuje funkci.
  *
- * vraci se hodnota na vrcholu zasobniku - volajici to musi popnout
+ * Parametry se předávají pomocí datového zásobníku.
+ * Výsledná hodnota se vrací na vrcholu zásobníku.
+ *
+ * @param function Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
  */
 static IFJ_ERR generate_function(ast_node_t *function) {
   CHECK_ARG_NULL_RET(function);
@@ -1877,11 +2149,13 @@ static IFJ_ERR generate_function(ast_node_t *function) {
 
   IFJ_ERR err;
 
+  // Inicializuje pole jmen lokálních proměnných.
   err = local_ids_ctor(&local_ids);
   CHECK_ERR_RET(err);
 
-  printf("LABEL %s\n", function->as.func.id); // vytvoří návěští funkce
-  // vytvoří lokální kopie parametrů
+  printf("LABEL %s\n", function->as.func.id);
+
+  // Lokální kopie parametrů.
   if (function->as.func.param_lists != NULL) {
     printf("\t#Local copies of parameters\n");
     for (size_t i = function->as.func.param_lists_cnt; i > 0; i--) {
@@ -1896,11 +2170,13 @@ static IFJ_ERR generate_function(ast_node_t *function) {
     printf("\n");
   }
 
+  // Tělo funkce.
   err = generate_body(function->as.func.body);
   CHECK_ERR_GOTO(err, cleanup);
 
   printf("\tRETURN\n\n");
 
+  // Destrukce pole jmen lokálních proměnných.
   local_ids_dtor(&local_ids);
 
   return IFJ_SUCCESS;
@@ -1910,6 +2186,12 @@ cleanup:
   return IFJ_EINTERNAL;
 }
 
+/**
+ * @brief Generuje všechny funkce programu.
+ *
+ * @param root Ukazatel na kořen abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 static IFJ_ERR generate_funcitons(ast_node_t *root) {
   CHECK_ARG_NULL_RET(root);
 
@@ -1924,7 +2206,6 @@ static IFJ_ERR generate_funcitons(ast_node_t *root) {
 // ==================== EXPORTOVANÉ FUNKCE ====================
 IFJ_ERR generate(ast_node_t *root) {
   CHECK_ARG_NULL_RET(root);
-  // ast_print(root);
   IFJ_ERR err;
 
   if (root->type != AST_ROOT) {

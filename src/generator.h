@@ -8,12 +8,16 @@
 #ifndef IFJ_GENERATOR_H
 #define IFJ_GENERATOR_H
 
-// --- libraries ---
-
-// --- our files ---
+// --- Naše soubory ---
 #include "ast.h"
 #include "error.h"
 
+/**
+ * @brief Generuje kód IFJcode26.
+ *
+ * @param root Ukazatel na kořen abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
 IFJ_ERR generate(ast_node_t *root);
 
 #endif // IFJ_GENERATOR_H
