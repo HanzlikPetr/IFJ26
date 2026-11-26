@@ -364,13 +364,21 @@ static IFJ_ERR start_code(ast_node_t *root) {
   // Pomocná funkce -floorHelp
   printf("LABEL -floorHelp\n"
          "\tDEFVAR LF@number\n"
+         "\tDEFVAR LF@originalNumber\n"
          "\tPOPS LF@number\n"
-         "\tLT GF@-temp LF@number int@0\n"
-         "\tJUMPIFEQ -floorHelpSkip GF@-temp bool@false\n"
+         "\tMOVE LF@originalNumber LF@number\n"
+
+         // Pokud Je číslo kladné, nebo celé, udělá se truncate.
+         "\tLT GF@-temp LF@number float@0x0p+0\n"
+         "\tFLOAT2INT LF@number LF@number\n"
+         "\tINT2FLOAT LF@number LF@number\n"
+         "\tJUMPIFEQ -floorHelpEnd GF@-temp bool@false\n"
+         "\tJUMPIFEQ -floorHelpEnd LF@originalNumber LF@number\n"
 
          // Pokud to je potřeba, správně zaokrouhlí záporná čísla.
-         "\tSUB LF@number LF@number int@1\n"
-         "\nLABEL -floorHelpSkip\n"
+         "\tSUB LF@number LF@number float@0x1p+0\n"
+
+         "\nLABEL -floorHelpEnd\n"
          "\tPUSHS LF@number\n"
          "\tRETURN\n\n");
 
@@ -821,8 +829,16 @@ static IFJ_ERR valmem(ast_node_t *expr) {
 
   // Podmínka ukončující rekurzi.
   if (expr->as.expr.binary.lhs->type != AST_EXPR) {
-    err = get_snippet(expr->as.expr.binary.lhs, &snippet);
-    CHECK_ERR_RET(err);
+    if (expr->as.expr.binary.lhs->type == AST_FUNC_CALL) {
+      err = call_func(expr->as.expr.binary.lhs);
+      CHECK_ERR_RET(err);
+
+      printf("\tPOPS GF@-temp\n");
+      snippet = "GF@-temp";
+    } else {
+      err = get_snippet(expr->as.expr.binary.lhs, &snippet);
+      CHECK_ERR_RET(err);
+    }
 
     if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
       printf("\n\t# VALMEM\n"
@@ -833,7 +849,6 @@ static IFJ_ERR valmem(ast_node_t *expr) {
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
-      free(snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
       printf("\n\t# VALMEM\n"
              "\tCREATEFRAME\n"
@@ -843,7 +858,6 @@ static IFJ_ERR valmem(ast_node_t *expr) {
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
-      free(snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
       printf("\n\t# VALMEM\n"
              "\tCREATEFRAME\n"
@@ -853,20 +867,17 @@ static IFJ_ERR valmem(ast_node_t *expr) {
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
-      free(snippet);
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
       printf("\tCREATEFRAME\n"
              "\tPUSHS %s\n"
              "\tPUSHFRAME\n"
-             "\tCALL toInt\n"
-             "\tPOPFRAME\n"
-             "\tCREATEFRAME\n"
-             "\tPUSHFRAME\n"
              "\tCALL -floorHelp\n"
              "\tPOPFRAME\n"
-             "\tPOPS GF@-temp\n"
-             "\tINT2FLOAT GF@-temp GF@-temp\n",
+             "\tPOPS GF@-temp\n",
              snippet);
+    }
+
+    if (expr->as.expr.binary.lhs->type != AST_FUNC_CALL) {
       free(snippet);
     }
 
@@ -889,20 +900,22 @@ static IFJ_ERR valmem(ast_node_t *expr) {
 
     if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toString") == 0) {
       printf("\tCALL toStr\n");
+      printf("\tPOPFRAME\n");
       printf("\tPOPS GF@-temp\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "toInt") == 0) {
       printf("\tCALL toInt\n");
+      printf("\tPOPFRAME\n");
       printf("\tPOPS GF@-temp\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "length") == 0) {
       printf("\tCALL strLength\n");
+      printf("\tPOPFRAME\n");
       printf("\tPOPS GF@-temp\n");
     } else if (strcmp(expr->as.expr.binary.rhs->as.var.id, "floor") == 0) {
-      printf("\tCALL toInt\n"
-             "\tPOPS GF@-temp\n"
-             "\tINT2FLOAT GF@-temp GF@-temp\n");
+      printf("\tCALL -floorHelp\n"
+             "\tPOPFRAME\n"
+             "\tPOPS GF@-temp\n");
     }
 
-    printf("\tPOPFRAME\n");
     printf("\t# end of valmem chain\n\n");
 
     return IFJ_SUCCESS;
@@ -953,7 +966,7 @@ static IFJ_ERR calc_expression(ast_node_t *expr) {
         printf("\tMUL GF@-temp GF@-temp int@-1\n");
       } else if (expr->as.expr.unary.operand->inferred_type.type ==
                  TYPE_DOUBLE) {
-        printf("\tMUL GF@-temp GF@-temp float@-1.0\n");
+        printf("\tMUL GF@-temp GF@-temp float@-0x1p+0\n");
       }
     }
 
