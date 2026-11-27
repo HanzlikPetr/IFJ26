@@ -353,7 +353,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
-  // Funkce readBoolean
+  // Funkce readBoolean.
   printf("LABEL readBoolean\n"
          "\tDEFVAR LF@value\n"
          "\tREAD LF@value bool\n"
@@ -364,7 +364,7 @@ static IFJ_ERR start_code(ast_node_t *root) {
          "\tPUSHS LF@value\n"
          "\tRETURN\n\n");
 
-  // Pomocná funkce -floorHelp
+  // Pomocná funkce -floorHelp.
   printf("LABEL -floorHelp\n"
          "\tDEFVAR LF@number\n"
          "\tDEFVAR LF@originalNumber\n"
@@ -383,6 +383,114 @@ static IFJ_ERR start_code(ast_node_t *root) {
 
          "\nLABEL -floorHelpEnd\n"
          "\tPUSHS LF@number\n"
+         "\tRETURN\n\n");
+
+  // Kontruktor seznamu.
+  printf("LABEL List\n"
+         "\tDEFVAR LF@size\n"
+         "\tPOPS LF@size\n"
+         "\tDEFVAR LF@value\n"
+
+         // Vytvoření seznamu.
+         "\tDEFVAR LF@array\n"
+         "\tNEWARRAY LF@array LF@size\n"
+
+         "\tDEFVAR LF@i\n"
+         "\tMOVE LF@i LF@size\n"
+
+         // Vkládání hodnot.
+         "\nLABEL -ListForLoop\n"
+         "\tSUB LF@i LF@i int@1\n"
+         "\tJUMPIFEQ -ListForEnd LF@i int@-1\n"
+
+         "\tPOPS LF@value\n"
+         "\tARRAYSET LF@array LF@i LF@value\n"
+         "\tJUMP -ListForLoop\n"
+
+         "\nLABEL -ListForEnd\n"
+         "\tPUSHS LF@array\n"
+         "\tRETURN\n\n");
+
+  // Funkce take.
+  printf("LABEL -take\n"
+         "\tDEFVAR LF@array\n"
+         "\tPOPS LF@array\n"
+
+         "\tDEFVAR LF@n\n"
+         "\tPOPS LF@n\n"
+
+         "\tDEFVAR LF@value\n"
+         "\tDEFVAR LF@res\n"
+
+         // Vytvoření nového seznamu.
+         "\tNEWARRAY LF@res LF@n\n"
+
+         "\tDEFVAR LF@i\n"
+         "\tMOVE LF@i int@-1\n"
+
+         // Kopírování hodnot.
+         "\nLABEL -takeForLoop\n"
+         "\tADD LF@i LF@i int@1\n"
+         "\tJUMPIFEQ -takeForEnd LF@i LF@n\n"
+
+         "\tARRAYGET LF@value LF@array LF@i\n"
+         "\tARRAYSET LF@res LF@i LF@value\n"
+         "\tJUMP -takeForLoop\n"
+
+         "\nLABEL -takeForEnd\n"
+         "\tPUSHS LF@res\n"
+         "\tRETURN\n\n");
+
+  // Funkce slice.
+  printf("LABEL -slice\n"
+         "\tDEFVAR LF@array\n"
+         "\tPOPS LF@array\n"
+
+         "\nDEFVAR LF@until\n"
+         "\tPOPS LF@until\n"
+
+         "\tDEFVAR LF@from\n"
+         "\tPOPS LF@from\n"
+
+         "\tDEFVAR LF@value\n"
+         "\tDEFVAR LF@res\n"
+
+         // Podmínky funkce.
+         "\tDEFVAR LF@size\n"
+         "\tSUB LF@size LF@until LF@from\n"
+         "\tLT GF@-temp LF@size int@0\n"
+         "\tJUMPIFEQ -error GF@-temp bool@true\n"
+
+         // Vytvoření nového seznamu.
+         "\tNEWARRAY LF@res LF@size\n"
+
+         "\tDEFVAR LF@i\n"
+         "\tMOVE LF@i int@-1\n"
+
+         "\tDEFVAR LF@j\n"
+         "\tMOVE LF@j LF@from\n"
+         "\tSUB LF@j LF@j int@1\n"
+
+         // Kopírování hodnot.
+         "\nLABEL -sliceForLoop\n"
+         "\tADD LF@i LF@i int@1\n"
+         "\tJUMPIFEQ -sliceForEnd LF@i LF@size\n"
+
+         "\tADD LF@j LF@j int@1\n"
+         "\tARRAYGET LF@value LF@array LF@j\n"
+         "\tARRAYSET LF@res LF@i LF@value\n"
+         "\tJUMP -sliceForLoop\n"
+
+         "\nLABEL -sliceForEnd\n"
+         "\tPUSHS LF@res\n"
+         "\tRETURN\n\n");
+
+  // Funkce head.
+  printf("LABEL -head\n"
+         "\tDEFVAR LF@array\n"
+         "\tPOPS LF@array\n"
+         "\tARRAYGET GF@-temp LF@array int@0\n"
+         "\tPUSHS GF@-temp\n"
          "\tRETURN\n\n");
 
   printf("\t# User defined functions\n");
@@ -818,6 +926,77 @@ static IFJ_ERR get_op(ast_node_t *expr, const char **snippet) {
 }
 
 /**
+ * @brief Generuje zavolání vestavěné funkce rozšíření LISTS.
+ *
+ * @param list Ukazatel na uzel abstraktního syntaktcikého stromu.
+ * @param params Ukazatel na uzel AST, který nese parametry funkce.
+ * @param func Jméno funkce, která se má zavolat.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR lists_funcs(ast_node_t *list, ast_node_t *params, char *func) {
+  CHECK_ARG_NULL_RET(list);
+  char *snippet;
+  IFJ_ERR err = get_snippet(list, &snippet);
+  CHECK_ERR_RET(err);
+
+  // Parametry funkce.
+  if (params) {
+    for (size_t i = 0; i < params->as.param_list.params_cnt; i++) {
+      ast_node_t *param = params->as.param_list.params[i];
+
+      switch (param->type) {
+      case AST_LITERAL:
+        printf("\tPUSHS int@%d\n", (int)param->as.literal.int_value);
+        break;
+
+      case AST_VAR:
+        printf("\tPUSHS LF@%s\n", param->as.var.id);
+        break;
+
+      case AST_EXPR:
+        err = calc_expression(param);
+        CHECK_ERR_RET(err);
+
+        printf("\tPUSHS GF@-temp\n");
+        break;
+
+      case AST_FUNC_CALL:
+        err = call_func(param);
+        CHECK_ERR_RET(err);
+
+        printf("\tPOPS GF@-temp\n");
+        printf("\tPUSHS GF@-temp\n");
+        break;
+
+      case AST_IF:
+        err = condition(param);
+        CHECK_ERR_RET(err);
+
+        printf("\tPUSHS LF@-return\n");
+        break;
+
+      default:
+        LOG_ERR(IFJ_EINTERNAL, "Unknown parameter");
+        return IFJ_EINTERNAL;
+      }
+    }
+  }
+
+  // Zavolání funkce.
+  printf("\tCREATEFRAME\n"
+         "\tPUSHS %s\n"
+         "\tPUSHFRAME\n"
+         "\tCALL -%s\n"
+         "\tPOPFRAME\n"
+         "\tPOPS GF@-temp\n",
+         snippet, func);
+
+  free(snippet);
+
+  return IFJ_SUCCESS;
+}
+
+/**
  * @brief Generuje rozšíření VALMEM.
  *
  * Po zavolání se výsledek nachází v GF@-temp.
@@ -878,6 +1057,25 @@ static IFJ_ERR valmem(ast_node_t *expr) {
              "\tPOPFRAME\n"
              "\tPOPS GF@-temp\n",
              snippet);
+    } else if (strcmp(expr->as.expr.binary.rhs->as.func_call.id, "drop") == 0) {
+      ast_node_t *param_list =
+          expr->as.expr.binary.rhs->as.func_call.param_lists[0];
+      err = lists_funcs(expr->as.expr.binary.lhs, param_list, "drop");
+      CHECK_ERR_RET(err);
+    } else if (strcmp(expr->as.expr.binary.rhs->as.func_call.id, "take") == 0) {
+      ast_node_t *param_list =
+          expr->as.expr.binary.rhs->as.func_call.param_lists[0];
+      err = lists_funcs(expr->as.expr.binary.lhs, param_list, "take");
+      CHECK_ERR_RET(err);
+    } else if (strcmp(expr->as.expr.binary.rhs->as.func_call.id, "slice") ==
+               0) {
+      ast_node_t *param_list =
+          expr->as.expr.binary.rhs->as.func_call.param_lists[0];
+      err = lists_funcs(expr->as.expr.binary.lhs, param_list, "slice");
+      CHECK_ERR_RET(err);
+    } else if (strcmp(expr->as.expr.binary.rhs->as.func_call.id, "head") == 0) {
+      err = lists_funcs(expr->as.expr.binary.lhs, NULL, "head");
+      CHECK_ERR_RET(err);
     }
 
     if (expr->as.expr.binary.lhs->type != AST_FUNC_CALL) {
@@ -1080,6 +1278,69 @@ static IFJ_ERR push_params(ast_node_t *func_call) {
     }
   }
 
+  // Pokud se vytřáří seznam, prvním parametrem je počet prvků seznamu.
+  if (strcmp(func_call->as.func_call.id, "List") == 0) {
+    printf(
+        "\tPUSHS int@%d\n",
+        (int)func_call->as.func_call.param_lists[0]->as.param_list.params_cnt);
+  }
+
+  return IFJ_SUCCESS;
+}
+
+/**
+ * @brief Určí, jestli má funkce vrátit hodnotu ze seznamu.
+ *
+ * @param name Jméno funkce.
+ * @return true pokud je funkce ve skutečnosti seznam, jinak false.
+ */
+static bool is_list(char *name) {
+  for (size_t i = 1; i < local_ids.size; i++) {
+    if (strcmp(name, local_ids.data[i]) == 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * @brief Vrací hodnotu seznamu na daném indexu.
+ *
+ * @param func_call Ukazatel na uzel abstraktního syntaktického stromu.
+ * @return IFJ_SUCCESS při úspěchu, jinak chybový kód.
+ */
+static IFJ_ERR get_list_value(ast_node_t *func_call) {
+  CHECK_ARG_NULL_RET(func_call);
+  IFJ_ERR err;
+  char *snippet;
+  ast_node_t *params = func_call->as.func_call.param_lists[0];
+
+  if (params->as.param_list.params[0]->type == AST_VAR ||
+      params->as.param_list.params[0]->type == AST_LITERAL) {
+    err = get_snippet(params->as.param_list.params[0], &snippet);
+    CHECK_ERR_RET(err);
+
+    printf("\tARRAYGET LF@-return LF@%s %s\n", func_call->as.func_call.id,
+           snippet);
+    free(snippet);
+  } else if (params->as.param_list.params[0]->type == AST_EXPR) {
+    err = calc_expression(params->as.param_list.params[0]);
+    CHECK_ERR_RET(err);
+
+    printf("\tARRAYGET LF@-return LF@%s GF@-temp \n",
+           func_call->as.func_call.id);
+  } else if (params->as.param_list.params[0]->type == AST_FUNC_CALL) {
+    err = call_func(params->as.param_list.params[0]);
+    CHECK_ERR_RET(err);
+
+    printf("\tPOPS GF@-temp\n");
+    printf("\tARRAYGET LF@-return LF@%s GF@-temp \n",
+           func_call->as.func_call.id);
+  }
+
+  printf("\tPUSHS LF@-return\n");
+
   return IFJ_SUCCESS;
 }
 
@@ -1092,6 +1353,10 @@ static IFJ_ERR push_params(ast_node_t *func_call) {
 static IFJ_ERR call_func(ast_node_t *func_call) {
   CHECK_ARG_NULL_RET(func_call);
   IFJ_ERR err;
+
+  if (is_list(func_call->as.func_call.id)) {
+    return get_list_value(func_call);
+  }
 
   err = push_params(func_call);
   CHECK_ERR_RET(err);
